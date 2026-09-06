@@ -1,0 +1,690 @@
+// E-Setu Core Datasets & State Store
+// CPCB & MPCB Compliant Reference Architecture
+
+const ESETU_DATA = {
+  // Official Central Pollution Control Board (CPCB) Verified Recyclers Registry
+  // Strict Anti-Fake Guard: Recycler login checks against this database
+  validCpcbRegistrations: [
+    'CPCB/EPR-REC/2023/MH-0842',
+    'CPCB/EPR-REC/2022/MH-0199',
+    'CPCB/EPR-REC/2024/MH-1102',
+    'CPCB/EPR-REC/2025/DL-0318',
+    'CPCB/EPR-REC/2024/GJ-0721'
+  ],
+
+  // PREDEFINED REGISTERED RECYCLERS (Only authorized recyclers can log in)
+  predefinedRecyclers: [
+    {
+      cpcbRegNo: 'CPCB/EPR-REC/2023/MH-0842',
+      phone: '9820111223',
+      pin: '8420',
+      name: 'MahaGreen E-Waste Recyclers Pvt Ltd',
+      facility: 'MIDC Chakan Phase II, Pune'
+    },
+    {
+      cpcbRegNo: 'CPCB/EPR-REC/2022/MH-0199',
+      phone: '9820222334',
+      pin: '0199',
+      name: 'EcoMetals Refining & Extraction Corp',
+      facility: 'MIDC Ranjangaon Electronics Zone, Pune'
+    },
+    {
+      cpcbRegNo: 'CPCB/EPR-REC/2024/MH-1102',
+      phone: '9820333445',
+      pin: '1102',
+      name: 'CleanEarth Circular Solutions Ltd',
+      facility: 'Taloja Industrial Belt, Navi Mumbai'
+    }
+  ],
+
+  // PREDEFINED REGISTERED KABADIWALAS (Prevents customers from logging in as scrap dealers)
+  predefinedKabadiwalas: [
+    {
+      kabadiId: 'KAB-MH-4452',
+      phone: '9820144521',
+      pin: '4452',
+      name: 'Raju Shinde',
+      yard: 'Shinde Scrap Traders',
+      location: 'Kothrud, Pune'
+    },
+    {
+      kabadiId: 'KAB-MH-1899',
+      phone: '9763218990',
+      pin: '1899',
+      name: 'Mohammed Bhai',
+      yard: 'City E-Scrap Center',
+      location: 'Shivaji Nagar, Pune'
+    },
+    {
+      kabadiId: 'KAB-MH-5512',
+      phone: '9890455123',
+      pin: '5512',
+      name: 'Ganesh Rathod',
+      yard: 'Rathod Kabadi Bandhu',
+      location: 'Hadapsar, Pune'
+    }
+  ],
+
+  // 1. MATERIAL CATALOG WITH RETAIL (CUSTOMER) & WHOLESALE (RECYCLER) PRICES (7 LANGUAGES)
+  // Each material has 10 live price history points that fluctuate every 10 seconds
+  materials: [
+    {
+      id: 'mat-pcb-high',
+      symbol: 'PCB-HI',
+      name: 'High-Grade PCBs (Server / Smartphone / RAM)',
+      nameMr: 'उच्च दर्जाचे पीसीबी (सर्व्हर / स्मार्टफोन / रॅम)',
+      nameHi: 'उच्च गुणवत्ता पीसीबी (सर्वर / स्मार्टफोन / रैम)',
+      nameTa: 'உயர்தர பிசிபி பலகைகள் (சர்வர் / ஸ்மார்ட்போன் / ரேம்)',
+      nameTe: 'హై-గ్రేడ్ పిసిబి బోర్డులు (సర్వర్ / స్మార్ట్‌ఫోన్ / ర్యామ్)',
+      nameKn: 'ಉನ್ನತ ದರ್ಜೆಯ ಪಿಸಿಬಿ ಬೋರ್ಡ್‌ಗಳು (ಸರ್ವರ್ / ಸ್ಮಾರ್ಟ್‌ಫೋನ್)',
+      nameMl: 'ഹൈ-ഗ്രേഡ് പിസിബി ബോർഡുകൾ (സെർവർ / സ്മാർട്ട്ഫോൺ)',
+      icon: '💻',
+      customerRate: 950,
+      recyclerRate: 1280,
+      rate6hrAgo: 1220,
+      recyclerRate6hrAgo: 1220,
+      unit: 'kg',
+      changePct: '+4.9%',
+      isPositive: true,
+      dayHigh: 1310,
+      dayLow: 1210,
+      volume: '1,420 kg',
+      sparkline: [1210, 1225, 1220, 1240, 1255, 1250, 1270, 1265, 1275, 1280],
+      description: 'Telecom boards, gold-plated server motherboards, multi-layer circuit boards.',
+      metals: 'Gold (0.25g/kg), Silver (1.2g/kg), Copper (18%), Palladium',
+      hazardLevel: 'Medium',
+      properProcess: 'Hydrometallurgical chemical extraction in closed loop (Never acid leach at home!)'
+    },
+    {
+      id: 'mat-copper-wire',
+      symbol: 'CU-WIRE',
+      name: 'Copper Cables & Insulated Wiring',
+      nameMr: 'तांब्याची वायर आणि केबल्स',
+      nameHi: 'तांबे की तार और केबल',
+      nameTa: 'தாமிர கம்பிகள் மற்றும் கேபிள்கள்',
+      nameTe: 'రాగి వైర్లు మరియు కేబుల్స్',
+      nameKn: 'ತಾಮ್ರದ ತಂತಿಗಳು ಮತ್ತು ಕೇಬಲ್‌ಗಳು',
+      nameMl: 'ചെമ്പ് വയറുകളും കേബിളുകളും',
+      icon: '🔌',
+      customerRate: 360,
+      recyclerRate: 485,
+      rate6hrAgo: 460,
+      recyclerRate6hrAgo: 460,
+      unit: 'kg',
+      changePct: '+5.4%',
+      isPositive: true,
+      dayHigh: 495,
+      dayLow: 450,
+      volume: '4,800 kg',
+      sparkline: [450, 455, 462, 460, 470, 468, 475, 480, 482, 485],
+      description: 'Power cables, network cables, appliance wiring with PVC sheath.',
+      metals: 'Copper (45-65% by weight), PVC/PE plastic',
+      hazardLevel: 'High',
+      properProcess: 'Mechanical wire stripping/granulation (Never burn in open air - creates cancer-causing dioxins!)'
+    },
+    {
+      id: 'mat-li-battery',
+      symbol: 'LI-BATT',
+      name: 'Lithium-Ion / EV / Laptop Batteries',
+      nameMr: 'लिथियम-आयन / लॅपटॉप बॅटऱ्या',
+      nameHi: 'लिथियम-आयन / लैपटॉप बैटरी',
+      nameTa: 'லித்தியம்-அயன் / மடிக்கணினி பேட்டரிகள்',
+      nameTe: 'లిథియం-అయాన్ / ల్యాప్‌టాప్ బ్యాటరీలు',
+      nameKn: 'ಲಿಥಿಯಂ-ಐಯಾನ್ / ಲ್ಯಾಪ್‌ಟಾಪ್ ಬ್ಯಾಟರಿಗಳು',
+      nameMl: 'ലിഥിയം-അയൺ / ലാപ്ടോപ്പ് ബാറ്ററികൾ',
+      icon: '🔋',
+      customerRate: 160,
+      recyclerRate: 225,
+      rate6hrAgo: 235,
+      recyclerRate6hrAgo: 235,
+      unit: 'kg',
+      changePct: '-4.2%',
+      isPositive: false,
+      dayHigh: 240,
+      dayLow: 218,
+      volume: '850 kg',
+      sparkline: [238, 235, 232, 230, 226, 224, 228, 222, 224, 225],
+      description: 'Mobile phone pouch cells, 18650 laptop cylinders, EV battery packs.',
+      metals: 'Cobalt (15%), Lithium (7%), Nickel, Graphite',
+      hazardLevel: 'Critical',
+      properProcess: 'Inert atmosphere shredding & black mass recovery (Never puncture or throw in water - explosive fire!)'
+    },
+    {
+      id: 'mat-crt-monitors',
+      symbol: 'CRT-GLS',
+      name: 'CRT Televisions & Old Monitor Glass',
+      nameMr: 'जुने सीआरटी टीव्ही आणि मॉनिटर',
+      nameHi: 'पुराने सीआरटी टीवी और मॉनिटर',
+      nameTa: 'பழைய சிஆர்டி டிவி மற்றும் மானிட்டர் கண்ணாடி',
+      nameTe: 'పాత సిఆర్టి టివి మరియు మానిటర్ గ్లాస్',
+      nameKn: 'ಹಳೆಯ ಸಿಆರ್‌ಟಿ ಟಿವಿ ಮತ್ತು ಮಾನಿಟರ್ ಗಾಜು',
+      nameMl: 'പഴയ സിആർടി ടിവി, മോണിറ്റർ ഗ്ലാസ്',
+      icon: '📺',
+      customerRate: 15,
+      recyclerRate: 28,
+      rate6hrAgo: 28,
+      recyclerRate6hrAgo: 28,
+      unit: 'kg',
+      changePct: '0.0%',
+      isPositive: true,
+      dayHigh: 31,
+      dayLow: 25,
+      volume: '6,200 kg',
+      sparkline: [27, 28, 26, 28, 29, 28, 27, 28, 29, 28],
+      description: 'Heavy picture tube glass with lead funnel and phosphor faceplate.',
+      metals: 'Lead (up to 2 kg per tube), Glass cullet, Copper deflection yoke',
+      hazardLevel: 'High',
+      properProcess: 'Lead smelting furnace under negative pressure (Implosion hazard if smashed!)'
+    },
+    {
+      id: 'mat-lcd-led',
+      symbol: 'LCD-SCR',
+      name: 'LCD / LED Display Panels & Monitors',
+      nameMr: 'एलसीडी / एलईडी डिस्प्ले स्क्रीन',
+      nameHi: 'एलसीडी / एलईडी डिस्प्ले स्क्रीन',
+      nameTa: 'எல்சிடி / எல்இடி திரை பேனல்கள்',
+      nameTe: 'ఎల్‌సిడి / ఎల్‌ఇడి డిస్‌ప్లే ప్యానెల్లు',
+      nameKn: 'ಎಲ್‌ಸಿಡಿ / ಎಲ್‌ಇಡಿ ಡಿಸ್ಪ್ಲೇ ಪ್ಯಾನೆಲ್‌ಗಳು',
+      nameMl: 'എൽസിഡി / എൽഇഡി ഡിസ്പ്ലേ പാനലുകൾ',
+      icon: '🖥️',
+      customerRate: 85,
+      recyclerRate: 120,
+      rate6hrAgo: 112,
+      recyclerRate6hrAgo: 112,
+      unit: 'kg',
+      changePct: '+7.1%',
+      isPositive: true,
+      dayHigh: 126,
+      dayLow: 108,
+      volume: '1,950 kg',
+      sparkline: [110, 112, 114, 113, 116, 118, 117, 119, 121, 120],
+      description: 'Flat screen monitors, TV panels, CCFL or LED backlights.',
+      metals: 'Indium Tin Oxide, Aluminum frame, Optical diffusers',
+      hazardLevel: 'Medium',
+      properProcess: 'Careful demanufacturing to safely isolate mercury backlights (if CCFL).'
+    },
+    {
+      id: 'mat-electric-motors',
+      symbol: 'MOT-MAG',
+      name: 'Electric Motors & Neodymium Magnets',
+      nameMr: 'इलेक्ट्रिक मोटर्स आणि चुंबक संच',
+      nameHi: 'इलेक्ट्रिक मोटर और चुंबक असेंबली',
+      nameTa: 'மின்சார மோட்டார்கள் மற்றும் காந்தங்கள்',
+      nameTe: 'ఎలక్ట్రిక్ మోటార్లు మరియు అయస్కాంతాలు',
+      nameKn: 'ವಿದ್ಯುತ್ ಮೋಟಾರ್‌ಗಳು ಮತ್ತು ಆಯಸ್ಕಾಂತಗಳು',
+      nameMl: 'ഇലക്ട്രിക് മോട്ടോറുകളും കാന്തങ്ങളും',
+      icon: '⚙️',
+      customerRate: 110,
+      recyclerRate: 165,
+      rate6hrAgo: 158,
+      recyclerRate6hrAgo: 158,
+      unit: 'kg',
+      changePct: '+4.4%',
+      isPositive: true,
+      dayHigh: 172,
+      dayLow: 152,
+      volume: '3,100 kg',
+      sparkline: [154, 156, 158, 160, 159, 162, 161, 163, 166, 165],
+      description: 'Hard drive voice coil motors, fan motors, compressor stators.',
+      metals: 'Neodymium (Rare Earth NdFeB), Pure Copper windings, Steel armature',
+      hazardLevel: 'Low',
+      properProcess: 'Automated demagnetization & rare earth alloy recycling.'
+    },
+    {
+      id: 'mat-e-plastics',
+      symbol: 'PLAS-MIX',
+      name: 'Flame Retardant E-Waste Plastics',
+      nameMr: 'इलेक्ट्रॉनिक प्लास्टिक (ABS/PC)',
+      nameHi: 'इलेक्ट्रॉनिक प्लास्टिक (ABS/PC)',
+      nameTa: 'மின்னணு பிளாஸ்டிக் கழிவுகள்',
+      nameTe: 'ఎలక్ట్రానిక్ ప్లాస్టిక్ వ్యర్థాలు',
+      nameKn: 'ಎಲೆಕ್ಟ್ರಾನಿಕ್ ಪ್ಲಾಸ್ಟಿಕ್ ತ್ಯಾಜ್ಯ',
+      nameMl: 'ഇലക്ട്രോണിക് പ്ലാസ്റ്റിക് മാലിന്യങ്ങൾ',
+      icon: '♻️',
+      customerRate: 22,
+      recyclerRate: 38,
+      rate6hrAgo: 38,
+      recyclerRate6hrAgo: 38,
+      unit: 'kg',
+      changePct: '0.0%',
+      isPositive: true,
+      dayHigh: 41,
+      dayLow: 35,
+      volume: '9,400 kg',
+      sparkline: [36, 37, 38, 37, 39, 38, 37, 38, 39, 38],
+      description: 'Printer bodies, monitor bezels, keyboard keys (ABS, HIPS, PC).',
+      metals: 'Engineering polymers for industrial re-granulation',
+      hazardLevel: 'Medium',
+      properProcess: 'Near-infrared optical sorting (Never melt in cookpots - toxic bromine gases!)'
+    }
+  ],
+
+  // 1B. DAILY COLLECTION HISTORY COMPARISON FOR KABADIWALA PROFILE
+  dailyCollectionHistory: [
+    { day: 'Today (Mon)', date: '07 Sep', weightKg: 185, itemsCount: 42, revenue: 112400, gainVsYesterday: '+30.2% ▲' },
+    { day: 'Yesterday (Sun)', date: '06 Sep', weightKg: 142, itemsCount: 31, revenue: 86500, gainVsYesterday: '+18.3% ▲' },
+    { day: '2 Days Ago (Sat)', date: '05 Sep', weightKg: 120, itemsCount: 26, revenue: 74200, gainVsYesterday: '-4.0% ▼' },
+    { day: '3 Days Ago (Fri)', date: '04 Sep', weightKg: 125, itemsCount: 29, revenue: 78000, gainVsYesterday: '+11.6% ▲' },
+    { day: '4 Days Ago (Thu)', date: '03 Sep', weightKg: 112, itemsCount: 24, revenue: 69100, gainVsYesterday: '+6.6% ▲' },
+    { day: '5 Days Ago (Wed)', date: '02 Sep', weightKg: 105, itemsCount: 22, revenue: 64800, gainVsYesterday: '+2.9% ▲' },
+    { day: '6 Days Ago (Tue)', date: '01 Sep', weightKg: 102, itemsCount: 20, revenue: 61500, gainVsYesterday: 'Baseline' }
+  ],
+
+  // 1C. CUSTOMER HISTORICAL SCRAP SALES & RECYCLING IMPACT
+  customerSalesHistory: [
+    {
+      txId: 'TX-CUST-2026-881',
+      date: 'Today, 07 Sep 2026',
+      time: '11:15 AM',
+      dealerName: 'Raju Shinde',
+      shopName: 'Shinde Scrap Traders',
+      scrapItems: 'Old Laptop Motherboards (2 units) + Copper Wires',
+      weightKg: 8.5,
+      ratePerKg: 520,
+      totalPaid: 4420,
+      paymentMode: 'Immediate Cash at Doorstep',
+      status: 'Completed & Certified',
+      co2SavedKg: 18.2,
+      certId: 'CPCB-GREEN-MH-8810'
+    },
+    {
+      txId: 'TX-CUST-2026-752',
+      date: '02 Sep 2026',
+      time: '04:30 PM',
+      dealerName: 'Raju Shinde',
+      shopName: 'Shinde Scrap Traders',
+      scrapItems: 'Dead Inverter Lead-Acid Battery & Cables',
+      weightKg: 14.0,
+      ratePerKg: 180,
+      totalPaid: 2520,
+      paymentMode: 'Instant UPI Transfer',
+      status: 'Completed & Certified',
+      co2SavedKg: 32.5,
+      certId: 'CPCB-GREEN-MH-7521'
+    },
+    {
+      txId: 'TX-CUST-2026-640',
+      date: '24 Aug 2026',
+      time: '02:00 PM',
+      dealerName: 'Mohammed Bhai',
+      shopName: 'City E-Scrap Center',
+      scrapItems: 'Broken CRT Monitor & Desktop SMPS Unit',
+      weightKg: 18.5,
+      ratePerKg: 85,
+      totalPaid: 1572,
+      paymentMode: 'Immediate Cash at Doorstep',
+      status: 'Completed & Certified',
+      co2SavedKg: 24.1,
+      certId: 'CPCB-GREEN-MH-6409'
+    },
+    {
+      txId: 'TX-CUST-2026-512',
+      date: '10 Aug 2026',
+      time: '10:45 AM',
+      dealerName: 'Ganesh Rathod',
+      shopName: 'Rathod Kabadi Bandhu',
+      scrapItems: 'Smartphones (4 dead units) + Charger Wiring',
+      weightKg: 3.2,
+      ratePerKg: 850,
+      totalPaid: 2720,
+      paymentMode: 'Instant UPI Transfer',
+      status: 'Completed & Certified',
+      co2SavedKg: 9.8,
+      certId: 'CPCB-GREEN-MH-5128'
+    },
+    {
+      txId: 'TX-CUST-2026-401',
+      date: '28 Jul 2026',
+      time: '05:15 PM',
+      dealerName: 'Raju Shinde',
+      shopName: 'Shinde Scrap Traders',
+      scrapItems: 'Ceiling Fan Motor + Brass & Copper Scrap',
+      weightKg: 9.0,
+      ratePerKg: 240,
+      totalPaid: 2160,
+      paymentMode: 'Immediate Cash at Doorstep',
+      status: 'Completed & Certified',
+      co2SavedKg: 14.6,
+      certId: 'CPCB-GREEN-MH-4011'
+    }
+  ],
+
+  customerSalesSummary: {
+    totalWeightSoldKg: 53.2,
+    totalCashReceived: 13392,
+    totalPickupsCompleted: 5,
+    totalTreesEquivalent: 6,
+    totalCo2PreventedKg: 99.2,
+    toxicHeavyMetalsDivertedKg: 4.8,
+    preferredScrapDealer: 'Raju Shinde (Shinde Scrap Traders)'
+  },
+
+  customerMonthlyComparison: [
+    { period: 'This Month (Sep 2026)', weightKg: 22.5, pickups: 2, earnings: 6940, changeVsPrior: '+28.5% ▲' },
+    { period: 'Last Month (Aug 2026)', weightKg: 21.7, pickups: 2, earnings: 4292, changeVsPrior: '+98.7% ▲' },
+    { period: 'July 2026', weightKg: 9.0, pickups: 1, earnings: 2160, changeVsPrior: 'Baseline' }
+  ],
+
+  // 2. NEARBY VERIFIED KABADIWALAS (WITH DEEP INFO, MAP LINKS & LIVE ETA)
+  kabadiwalas: [
+    {
+      id: 'kab-01',
+      name: 'Raju Shinde',
+      shopName: 'Shinde Scrap Traders',
+      nameMr: 'राजू शिंदे (शिंदे स्क्रॅप ट्रेडर्स)',
+      nameHi: 'राजू शिंदे (शिंदे स्क्रैप ट्रेडर्स)',
+      phone: '+91 98201 44521',
+      location: 'Kothrud / Karve Road, Pune',
+      fullAddress: 'Shop No. 4, Karve Road, Near Cummins College & Karve Putala, Kothrud, Pune - 411038',
+      coordinates: '18.5074° N, 73.8077° E',
+      googleMapsUrl: 'https://www.google.com/maps/search/?api=1&query=18.5074,73.8077',
+      distanceKm: 0.8,
+      vehicle: 'Mahindra Bolero Pickup & Digital Scales',
+      vehiclePlate: 'MH-12-QX-4452',
+      photo: '👨🏽‍💼',
+      status: 'Online • Arriving in 12 mins',
+      etaMinutes: 12,
+      etaDistanceKm: 0.8,
+      transitState: 'On the way with digital hanging scale',
+      rating: 4.9,
+      totalReviews: 148,
+      badge: 'Verified E-Setu Partner',
+      licenseNo: 'PMMC/SHOP-ACT/2021/KT-0442',
+      weighingEquipment: 'Legal Metrology Certified Electronic Hanging Scale (0-100 kg, Calibrated ±10g)',
+      operatingHours: '8:00 AM – 8:30 PM (All 7 Days)',
+      materialsAccepted: 'PCBs & Motherboards, Copper Cables, Mobile Phones, Lithium Batteries, CRT/LED TVs, Inverter Batteries',
+      cashOnCollection: true,
+      reviews: [
+        { customer: 'Sunil Jadhav', rating: 5, date: 'Yesterday', text: 'Prompt doorstep pickup. Brought a certified digital hanging scale and paid exact ₹2,850 in cash immediately.' },
+        { customer: 'Dr. Anjali Gokhale', rating: 5, date: '3 days ago', text: 'Very polite. Took away our 2 old desktop towers and dead UPS. Excellent fair rates compared to street hawkers.' },
+        { customer: 'Praveen Shah', rating: 4.8, date: '1 week ago', text: 'Checked cables and batteries cleanly. No haggling, paid via UPI on spot.' }
+      ]
+    },
+    {
+      id: 'kab-02',
+      name: 'Mohammed Bhai',
+      shopName: 'City E-Scrap Center',
+      nameMr: 'मोहम्मद भाई (सिटी ई-स्क्रॅप सेंटर)',
+      nameHi: 'मोहम्मद भाई (सिटी ई-स्क्रैप सेंटर)',
+      phone: '+91 97632 18990',
+      location: 'Shivaji Nagar, Pune',
+      fullAddress: 'Plot 12, Old Pune-Mumbai Highway, Near Shivaji Nagar Bus Depot, Pune - 411005',
+      coordinates: '18.5314° N, 73.8446° E',
+      googleMapsUrl: 'https://www.google.com/maps/search/?api=1&query=18.5314,73.8446',
+      distanceKm: 1.4,
+      vehicle: 'E-Loader Rickshaw (Eco-Friendly)',
+      vehiclePlate: 'MH-12-EV-1899',
+      photo: '👳🏽',
+      status: 'Online • Arriving in 25 mins',
+      etaMinutes: 25,
+      etaDistanceKm: 1.4,
+      transitState: 'Dispatched on Electric Rickshaw',
+      rating: 4.8,
+      totalReviews: 92,
+      badge: 'Certified Safe Collector',
+      licenseNo: 'PMMC/SHOP-ACT/2019/SN-1899',
+      weighingEquipment: 'Class III Certified Digital Platform Scale (150 kg capacity)',
+      operatingHours: '8:30 AM – 8:00 PM (Mon–Sat)',
+      materialsAccepted: 'Laptops, Desktop Towers, Circuit Boards, Copper Cables, Industrial Batteries',
+      cashOnCollection: true,
+      reviews: [
+        { customer: 'Vikas Deshmukh', rating: 5, date: '2 days ago', text: 'Gave me ₹450 for old laptop motherboards. Honest weighing.' },
+        { customer: 'Mrs. Neeta Patil', rating: 4.7, date: '5 days ago', text: 'Came on electric tempo. Very clean handling, gave printed cash receipt on the spot.' }
+      ]
+    },
+    {
+      id: 'kab-03',
+      name: 'Ganesh Rathod',
+      shopName: 'Rathod Kabadi Bandhu',
+      nameMr: 'गणेश राठोड (राठोड कबाड़ी बंधू)',
+      nameHi: 'गणेश राठौड़ (राठौड़ कबाड़ी बंधु)',
+      phone: '+91 98904 55123',
+      location: 'Hadapsar / Magarpatta, Pune',
+      fullAddress: 'Survey 48, Pune-Solapur Road, Near Gadital, Hadapsar, Pune - 411028',
+      coordinates: '18.4967° N, 73.9417° E',
+      googleMapsUrl: 'https://www.google.com/maps/search/?api=1&query=18.4967,73.9417',
+      distanceKm: 2.3,
+      vehicle: 'Tata Ace (Chhota Hathi)',
+      vehiclePlate: 'MH-12-DT-5512',
+      photo: '🧔🏽',
+      status: 'Available • Arrives in 35 mins',
+      etaMinutes: 35,
+      etaDistanceKm: 2.3,
+      transitState: 'Available for instant scheduling',
+      rating: 4.7,
+      totalReviews: 64,
+      badge: 'Bulk Pickup Specialist',
+      licenseNo: 'PMMC/SHOP-ACT/2022/HD-5512',
+      weighingEquipment: 'Heavy-Duty 300 kg Certified Portable Digital Scale',
+      operatingHours: '9:00 AM – 9:00 PM (All 7 Days)',
+      materialsAccepted: 'Society Bulk Drives, Server Racks, Printers, Heavy Copper Motors, AC Compressors',
+      cashOnCollection: true,
+      reviews: [
+        { customer: 'Amitabh Sen', rating: 5, date: 'Last week', text: 'Handled full society e-waste drive (210 kg). Paid full cash to housing society account.' }
+      ]
+    }
+  ],
+
+  // 3. AUTHORIZED WHOLESALE RECYCLERS (WITH DEEP FACILITY INFO, MAPS & LOGISTICS ETA)
+  recyclers: [
+    {
+      id: 'rec-01',
+      name: 'MahaGreen E-Waste Recyclers Pvt Ltd',
+      cpcbRegNo: 'CPCB/EPR-REC/2023/MH-0842',
+      mpcbAuthDate: 'Valid till 31-Dec-2028',
+      location: 'MIDC Chakan Industrial Area, Phase II, Pune',
+      fullAddress: 'Plot No. E-42, MIDC Chakan Phase II, Near Mercedes-Benz Plant, Pune - 410501',
+      coordinates: '18.7562° N, 73.8214° E',
+      googleMapsUrl: 'https://www.google.com/maps/search/?api=1&query=18.7562,73.8214',
+      distanceKm: 24.5,
+      capacity: '12,000 MT/annum',
+      rating: 4.9,
+      kabadiwalaReviewsCount: 86,
+      doorstepPickup: 'Free Recycler Logistics Pickup for lots > 100 kg',
+      minLotKg: 50,
+      paymentTerms: 'Immediate Cash at Gate or T+0 Bank RTGS',
+      verifiedBadge: 'Govt CPCB Authorized (R2/ISO Certified)',
+      operatingHours: '24/7 Gate Dispatch & Automated Weighbridge Receiving',
+      weighbridgeTech: '100-Ton Pitless Automated Weighbridge (Weights & Measures Certified)',
+      collectionTruckETA: 22,
+      collectionTruckStatus: 'Collection Truck MH-14-GH-8821 en route • ETA ~22 mins (Chakan Bypass)',
+      rates: {
+        'PCB-HI': 1280,
+        'CU-WIRE': 485,
+        'LI-BATT': 225,
+        'CRT-GLS': 28,
+        'LCD-SCR': 120,
+        'MOT-MAG': 165,
+        'PLAS-MIX': 38
+      },
+      kabadiwalaReviews: [
+        { author: 'Raju Shinde (Pune Aggregator)', rating: 5, date: '4 Sep 2026', text: 'Most honest automated weighbridge in Chakan. Unloaded 420 kg PCBs and cables, got instant ₹3,12,000 RTGS in 10 minutes.' },
+        { author: 'Salim Pathan (Bhosari)', rating: 5, date: '1 Sep 2026', text: 'They accept lithium batteries in safety drums and pay cash at gate if needed. Zero delay.' },
+        { author: 'Dnyaneshwar M.', rating: 4.8, date: '28 Aug 2026', text: 'Very supportive staff. Issues valid CPCB Form 6 certificate for every single lot.' }
+      ]
+    },
+    {
+      id: 'rec-02',
+      name: 'EcoMetals Refining & Extraction Corp',
+      cpcbRegNo: 'CPCB/EPR-REC/2022/MH-0199',
+      mpcbAuthDate: 'Valid till 15-Aug-2027',
+      location: 'MIDC Ranjangaon Electronics Zone, Pune',
+      fullAddress: 'Plot B-16, Electronics Manufacturing Cluster, MIDC Ranjangaon, Pune - 412209',
+      coordinates: '18.7844° N, 74.2412° E',
+      googleMapsUrl: 'https://www.google.com/maps/search/?api=1&query=18.7844,74.2412',
+      distanceKm: 42.0,
+      capacity: '24,000 MT/annum',
+      rating: 4.7,
+      kabadiwalaReviewsCount: 114,
+      doorstepPickup: 'Free Recycler Logistics Pickup for lots > 250 kg',
+      minLotKg: 100,
+      paymentTerms: 'Instant Cash Voucher / Same-day NEFT',
+      verifiedBadge: 'Govt CPCB Authorized (ISO 14001)',
+      operatingHours: '7:00 AM – 10:00 PM Gate Receiving',
+      weighbridgeTech: '60-Ton Sensor-Driven Pit Weighbridge',
+      collectionTruckETA: 38,
+      collectionTruckStatus: 'Pickup Vehicle MH-12-RN-0199 scheduled • ETA ~38 mins',
+      rates: {
+        'PCB-HI': 1310,
+        'CU-WIRE': 480,
+        'LI-BATT': 230,
+        'CRT-GLS': 26,
+        'LCD-SCR': 118,
+        'MOT-MAG': 168,
+        'PLAS-MIX': 37
+      },
+      kabadiwalaReviews: [
+        { author: 'Kishore Jha', rating: 5, date: 'Yesterday', text: 'Top rates for gold-bearing server PCBs (+₹30/kg over market). Strict on clean separation though.' },
+        { author: 'Babanrao Kadam', rating: 4.6, date: '5 days ago', text: 'Good company, but min lot is 100 kg. Best for aggregated bulk loads.' }
+      ]
+    },
+    {
+      id: 'rec-03',
+      name: 'CleanEarth Circular Solutions Ltd',
+      cpcbRegNo: 'CPCB/EPR-REC/2024/MH-1102',
+      mpcbAuthDate: 'Valid till 30-Nov-2029',
+      location: 'Taloja Industrial Belt, Navi Mumbai / Raigad',
+      fullAddress: 'Plot 88, Sector 12, Taloja MIDC, Navi Mumbai - 410208',
+      coordinates: '19.0625° N, 73.1367° E',
+      googleMapsUrl: 'https://www.google.com/maps/search/?api=1&query=19.0625,73.1367',
+      distanceKm: 98.0,
+      capacity: '36,000 MT/annum',
+      rating: 4.8,
+      kabadiwalaReviewsCount: 156,
+      doorstepPickup: 'Scheduled Weekly Dedicated Route across Pune-Mumbai',
+      minLotKg: 75,
+      paymentTerms: 'Cash on Handover / UPI / Escrow',
+      verifiedBadge: 'Govt CPCB Authorized (Zero-Landfill Facility)',
+      operatingHours: '24 Hours Receiving & Unloading',
+      weighbridgeTech: '120-Ton Digital Weighbridge with RFID Tagging',
+      collectionTruckETA: 45,
+      collectionTruckStatus: 'Inter-city Logistics Route • Scheduled Arrival in ~45 mins',
+      rates: {
+        'PCB-HI': 1290,
+        'CU-WIRE': 490,
+        'LI-BATT': 222,
+        'CRT-GLS': 30,
+        'LCD-SCR': 122,
+        'MOT-MAG': 162,
+        'PLAS-MIX': 39
+      },
+      kabadiwalaReviews: [
+        { author: 'Sunil Gaware', rating: 5, date: '3 days ago', text: 'Their scheduled tempo comes directly to our Godown. No transportation hassle for us.' },
+        { author: 'Ashok Tambe', rating: 4.8, date: '10 Aug 2026', text: 'Highest rate for copper cables in Western Maharashtra. Recommended!' }
+      ]
+    }
+  ],
+
+  // 4. KABADIWALA'S AGGREGATED SCRAP INVENTORY (STOCKPILE)
+  inventory: [
+    { materialId: 'mat-pcb-high', symbol: 'PCB-HI', name: 'High-Grade PCBs', weightKg: 145, avgBuyCost: 940 },
+    { materialId: 'mat-copper-wire', symbol: 'CU-WIRE', name: 'Copper Cables', weightKg: 280, avgBuyCost: 355 },
+    { materialId: 'mat-li-battery', symbol: 'LI-BATT', name: 'Li-Ion Batteries', weightKg: 95, avgBuyCost: 158 },
+    { materialId: 'mat-electric-motors', symbol: 'MOT-MAG', name: 'Electric Motors', weightKg: 160, avgBuyCost: 108 },
+    { materialId: 'mat-crt-monitors', symbol: 'CRT-GLS', name: 'CRT Glass & Tubes', weightKg: 210, avgBuyCost: 14 }
+  ],
+
+  // 5. TRACEABLE ACTIVE LOTS & TRANSACTIONS
+  lots: [
+    {
+      lotId: 'ESETU-LOT-2026-9812',
+      date: '06-Sep-2026 18:30',
+      kabadiwalaId: 'kab-01',
+      kabadiwalaName: 'Raju Shinde',
+      recyclerId: 'rec-01',
+      recyclerName: 'MahaGreen E-Waste Recyclers Pvt Ltd',
+      material: 'Copper Cables & Insulated Wiring',
+      symbol: 'CU-WIRE',
+      weightKg: 150,
+      agreedRate: 485,
+      totalAmount: 72750,
+      paymentMethod: 'Cash on Handover at Gate',
+      paymentStatus: 'Paid',
+      status: 'Recycled & Verified',
+      gpsLocation: '18.7392° N, 73.8115° E (Chakan MIDC)',
+      cpcbManifestNo: 'MH-EPR-MAN-2026-004419',
+      eprCertIssued: true
+    },
+    {
+      lotId: 'ESETU-LOT-2026-9904',
+      date: '07-Sep-2026 00:45',
+      kabadiwalaId: 'kab-01',
+      kabadiwalaName: 'Raju Shinde',
+      recyclerId: 'rec-02',
+      recyclerName: 'EcoMetals Refining Corp',
+      material: 'High-Grade PCBs (Server / Smartphone)',
+      symbol: 'PCB-HI',
+      weightKg: 85,
+      agreedRate: 1310,
+      totalAmount: 111350,
+      paymentMethod: 'Same-day Bank RTGS',
+      paymentStatus: 'Pending Inspection',
+      status: 'In Transit / Pickup Booked',
+      gpsLocation: '18.5074° N, 73.8077° E (Kothrud Godown)',
+      cpcbManifestNo: 'MH-EPR-MAN-2026-004510',
+      eprCertIssued: false
+    }
+  ],
+
+  // 6. AUDIO-VISUAL SAFETY & HAZARD GUIDANCE CARDS
+  safetyGuides: [
+    {
+      id: 'safe-01',
+      title: 'Danger: Never Burn Copper Wires in Open Air',
+      titleMr: 'धोका: उघड्यावर तांब्याच्या तारा कधीही जाळू नका',
+      titleHi: 'खतरा: खुली हवा में तांबे के तारों को कभी न जलाएं',
+      icon: '🚫🔥',
+      color: '#dc2626',
+      hazard: 'Toxic Dioxins & Black Furan Fumes',
+      healthRisk: 'Permanent lung damage, cancer risk, and lead poisoning for you and your family.',
+      safeMethod: 'Use simple manual mechanical wire strippers or sell directly to recyclers with plastic sheath intact. Recyclers pay for the plastic too!',
+      audioScriptEn: 'Never burn insulated copper cables in the open. Burning PVC releases deadly dioxin gas causing cancer. Sell unstripped cables directly to authorized recyclers for full cash.',
+      audioScriptMr: 'उघड्यावर तारा जाळल्याने कॅन्सर पसरवणारा विषारी धूर निघतो. तारा न जाळता थेट अधिकृत रिसायकलरला विका, ते प्लास्टिकचेही पैसे देतात!',
+      audioScriptHi: 'खुली हवा में तारों को कभी न जलाएं! ऐसा करने से कैंसर पैदा करने वाला जहरीला धुआं निकलता है। पूरी केबल रीसायकलर को बेचें, वह सही दाम देगा।'
+    },
+    {
+      id: 'safe-02',
+      title: 'Caution: Acid Leaching on Circuit Boards is Deadly',
+      titleMr: 'सावधान: पीसीबी बोर्डवर ॲसिड / तेजाब वापरणे जीवघेणे आहे',
+      titleHi: 'सावधान: पीसीबी पर एसिड का उपयोग जानलेवा है',
+      icon: '☠️🧪',
+      color: '#b91c1c',
+      hazard: 'Cyanide & Nitric Acid Gas Releases',
+      healthRisk: 'Breathing acid fumes causes throat burns, blindness, and kidney failure. Informal acid pits only recover 20% of gold while losing expensive Palladium and Tantalum.',
+      safeMethod: 'Store motherboards in dry cartons and sell whole to CPCB units with computerized chemical extraction. You get paid for all 4 metals!',
+      audioScriptEn: 'Backyard acid leaching destroys your lungs and recovers only tiny gold. Authorized recyclers extract Gold, Silver, Palladium and Copper cleanly and pay top rates.',
+      audioScriptMr: 'तेजाब वापरल्याने डोळे आणि फुफ्फुसे जळतात. अधिकृत रिसायकलर्स आधुनिक मशिनने सोने, तांबे काढून जास्त पैसे देतात.',
+      audioScriptHi: 'पीसीबी पर तेजाब डालने से जानलेवा गैस निकलती है। अधिकृत रीसायकलर आधुनिक मशीनों से धातु निकाल कर सबसे ऊंचा दाम देते हैं।'
+    },
+    {
+      id: 'safe-03',
+      title: 'Warning: Handle Lithium Batteries with Extreme Care',
+      titleMr: 'चेतावणी: लिथियम बॅटऱ्यांना ठोकू किंवा दाबू नका',
+      titleHi: 'चेतावनी: लिथियम बैटरी को कभी न फोड़ें या दबाएं',
+      icon: '💥🔋',
+      color: '#ea580c',
+      hazard: 'Thermal Runaway Explosion & Violent Fires',
+      healthRisk: 'Punctured or bent mobile batteries spontaneously ignite at 800°C and cannot be extinguished with water.',
+      safeMethod: 'Tape the metal terminals with cello tape, store in dry plastic buckets with sand, and keep away from iron scrap.',
+      audioScriptEn: 'Do not hammer or puncture lithium batteries. They can explode into violent fires. Tape the terminals and store them in dry buckets.',
+      audioScriptMr: 'मोबाईल किंवा लॅपटॉपच्या बॅटऱ्यांना हातोड्याने ठोकू नका. ते अचानक पेट घेऊ शकतात. त्यांना कोरड्या बादलीत वाळूमध्ये ठेवा.',
+      audioScriptHi: 'लिथियम बैटरी पर हथौड़ा न चलाएं। इनमें 800 डिग्री का भयानक विस्फोट हो सकता है। इन्हें अलग प्लास्टिक बाल्टी में रखें।'
+    },
+    {
+      id: 'safe-04',
+      title: 'Safety: CRT Monitors Vacuum Implosion Hazard',
+      titleMr: 'सुरक्षा: जुन्या सीआरटी टीव्हीवर हातोडा मारू नका',
+      titleHi: 'सुरक्षा: पुराने सीआरटी मॉनिटर को पटक कर न तोड़ें',
+      icon: '🛡️📺',
+      color: '#d97706',
+      hazard: 'Glass Shrapnel & Leaded Toxic Phosphor Powder',
+      healthRisk: 'Smashed CRT tubes implode with huge force, shooting glass shards and toxic barium/lead dust into eyes and lungs.',
+      safeMethod: 'Keep the glass tube unbroken. Authorized recyclers have specialized negative-pressure diamond cutters to extract leaded glass safely.',
+      audioScriptEn: 'Do not break CRT tubes with hammers. Smashed tubes blast high-speed glass shards and toxic lead dust. Deliver unbroken for full value.',
+      audioScriptMr: 'सीआरटी टीव्ही फोडल्याने काचेचे तुकडे उडतात आणि शिशाची विषारी धूळ फुफ्फुसात जाते. काच अखंड ठेवून विका.',
+      audioScriptHi: 'सीआरटी टीवी को कभी पत्थर या हथौड़े से न तोड़ें। शीशा फूटने से आंखों में कांच लग सकता है। इसे साबुत ही बेचें।'
+    }
+  ]
+};
+
+window.ESETU_DATA = ESETU_DATA;
