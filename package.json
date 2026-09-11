@@ -1,0 +1,13 @@
+{
+  "name": "ecoscrap-ai",
+  "version": "1.0.0",
+  "description": "EcoScrap AI (E-Setu) - Smart E-Waste Collection & Recycling Platform, full-stack",
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.18.0",
+    "express": "^4.19.2"
+  }
+}

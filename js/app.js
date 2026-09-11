@@ -1,9 +1,31 @@
 // EcoScrap AI Application Controller & State Engine
 // Full-Width Web Platform with Strict Multi-Role Access Control & 7 Languages
 
+window.ESETU_DATA = window.ESETU_DATA || {};
+
+// Real GPS capture for registration (so "Open on Google Maps" links actually work).
+// Resolves to null if permission is denied/unavailable — registration still proceeds.
+function getBrowserCoordinates() {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) return resolve(null);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
+      () => resolve(null),
+      { timeout: 8000, maximumAge: 60000 }
+    );
+  });
+}
+
+// Register the service worker so the app can be installed on a home screen.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}
+
 const AppState = {
   user: null, // { role: 'customer' | 'kabadiwala' | 'recycler', name: '', phone: '', location: '', govRegNo: '', kabadiId: '' }
-  selectedMaterial: ESETU_DATA.materials[0],
+  selectedMaterial: null,
   calculatorWeight: 0.2,
   selectedPaymentMode: 'cash',
   capturedImage: null,
@@ -11,12 +33,24 @@ const AppState = {
   syncQueue: []
 };
 
-// Initialize Web App
-document.addEventListener('DOMContentLoaded', () => {
+// Initialize Web App — fetch real data from the backend before first render
+document.addEventListener('DOMContentLoaded', async () => {
   // Always start at Login Dashboard when index.html is opened
   AppState.user = null;
   localStorage.removeItem('esetu_user');
 
+  const loadingEl = document.getElementById('appContent');
+  if (loadingEl) loadingEl.innerHTML = '<div style="text-align:center; padding:60px 20px; font-size:15px; color:var(--text-muted);">Loading EcoScrap AI…</div>';
+
+  try {
+    const data = await API.bootstrap();
+    Object.assign(ESETU_DATA, data);
+  } catch (err) {
+    if (loadingEl) loadingEl.innerHTML = `<div style="text-align:center; padding:60px 20px; color:var(--danger);">Could not reach the server. Is it running? (${err.message})</div>`;
+    return;
+  }
+
+  AppState.selectedMaterial = ESETU_DATA.materials[0];
   setupEventListeners();
   renderApp();
 });
@@ -170,41 +204,38 @@ function renderLoginPage(container) {
             <div class="desktop-grid-2">
               <div class="form-group">
                 <label class="form-label">${I18N.t('nameLabel')}</label>
-                <input type="text" id="loginName" class="form-input" placeholder="${I18N.t('namePlaceholder')}" value="Vikas Deshmukh">
+                <input type="text" id="loginName" class="form-input" placeholder="${I18N.t('namePlaceholder')}" autocomplete="off">
               </div>
               <div class="form-group">
                 <label class="form-label">${I18N.t('phoneLabel')}</label>
-                <input type="tel" id="loginPhone" class="form-input" placeholder="${I18N.t('phonePlaceholder')}" value="98231 09845">
+                <input type="tel" id="loginPhone" class="form-input" placeholder="${I18N.t('phonePlaceholder')}" autocomplete="off">
               </div>
             </div>
             <div class="form-group">
               <label class="form-label">${I18N.t('pincodeLabel')}</label>
-              <input type="text" id="loginLocation" class="form-input" placeholder="${I18N.t('pincodePlaceholder')}" value="411038, Kothrud, Pune">
+              <input type="text" id="loginLocation" class="form-input" placeholder="${I18N.t('pincodePlaceholder')}" autocomplete="off">
             </div>
           ` : ''}
 
           <!-- Role 2: Kabadiwala Predefined Authorized Access -->
           ${selectedRole === 'kabadiwala' ? (kabadiMode === 'login' ? `
             <div style="background: #f0fdf4; border: 1.5px solid #86efac; border-radius: var(--radius-sm); padding: 14px; margin-bottom: 16px;">
-              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <div style="margin-bottom:8px;">
                 <strong style="color: #166534; font-size: 13px;">🔒 ${I18N.currentLang === 'en' ? 'Authorized Scrap Dealer Authentication' : 'अधिकृत कबाड़ी पडताळणी'}</strong>
-                <button type="button" class="btn-secondary" style="font-size: 11px; padding: 3px 8px;" onclick="fillDemoKabadiwala()">
-                  📋 ${I18N.t('registeredDemoHint')} Raju Shinde (9820144521)
-                </button>
               </div>
               <p style="font-size: 12px; color: #166534; margin-bottom: 12px;">
-                ${I18N.currentLang === 'en' 
-                  ? 'Only verified scrap dealers with a registered mobile number and PIN can access wholesale recycler spot bids.' 
+                ${I18N.currentLang === 'en'
+                  ? 'Only verified scrap dealers with a registered mobile number and PIN can access wholesale recycler spot bids.'
                   : 'फक्त अधिकृत व नोंदणीकृत कबाडी बंधूच घाऊक रिसायकलर दर पाहू शकतात.'}
               </p>
               <div class="desktop-grid-2">
                 <div class="form-group" style="margin-bottom:0;">
                   <label class="form-label">${I18N.t('phoneLabel')}</label>
-                  <input type="tel" id="loginPhone" class="form-input" placeholder="${I18N.t('phonePlaceholder')}" value="9820144521">
+                  <input type="tel" id="loginPhone" class="form-input" placeholder="${I18N.t('phonePlaceholder')}" autocomplete="off">
                 </div>
                 <div class="form-group" style="margin-bottom:0;">
                   <label class="form-label">${I18N.t('kabadiPinLabel')}</label>
-                  <input type="password" id="loginKabadiPin" class="form-input" placeholder="4452" value="4452" maxlength="6">
+                  <input type="password" id="loginKabadiPin" class="form-input" placeholder="${I18N.t('kabadiPinPlaceholder')}" maxlength="6" autocomplete="off">
                 </div>
               </div>
             </div>
@@ -213,17 +244,17 @@ function renderLoginPage(container) {
             <div class="desktop-grid-2">
               <div class="form-group">
                 <label class="form-label">${I18N.t('nameLabel')}</label>
-                <input type="text" id="loginName" class="form-input" placeholder="${I18N.t('namePlaceholder')}" value="Santosh Mohite">
+                <input type="text" id="loginName" class="form-input" placeholder="${I18N.t('namePlaceholder')}" autocomplete="off">
               </div>
               <div class="form-group">
                 <label class="form-label">${I18N.t('phoneLabel')}</label>
-                <input type="tel" id="loginPhone" class="form-input" placeholder="${I18N.t('phonePlaceholder')}" value="9820988776">
+                <input type="tel" id="loginPhone" class="form-input" placeholder="${I18N.t('phonePlaceholder')}" autocomplete="off">
               </div>
             </div>
             <div class="desktop-grid-2">
               <div class="form-group">
                 <label class="form-label">${I18N.t('godownLabel')}</label>
-                <input type="text" id="regGodownName" class="form-input" placeholder="e.g. Mohite Scrap Traders" value="Mohite Scrap Yard">
+                <input type="text" id="regGodownName" class="form-input" placeholder="e.g. Mohite Scrap Traders" autocomplete="off">
               </div>
               <div class="form-group">
                 <label class="form-label">${I18N.t('vehicleTypeLabel')}</label>
@@ -237,7 +268,7 @@ function renderLoginPage(container) {
             </div>
             <div class="form-group">
               <label class="form-label">${I18N.t('pincodeLabel')}</label>
-              <input type="text" id="loginLocation" class="form-input" placeholder="${I18N.t('pincodePlaceholder')}" value="411038, Kothrud, Pune">
+              <input type="text" id="loginLocation" class="form-input" placeholder="${I18N.t('pincodePlaceholder')}" autocomplete="off">
             </div>
             <div style="background: #f0fdf4; border: 1.5px solid #86efac; padding: 12px; border-radius: var(--radius-sm); margin-bottom: 14px; font-size: 13px; color: #166534;">
               <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
@@ -247,29 +278,26 @@ function renderLoginPage(container) {
             </div>
           `) : ''}
 
-          <!-- Role 3: Recycler Predefined CPCB License Check -->
+          <!-- Role 3: Recycler CPCB Registration (self-service: first login = real registration) -->
           ${selectedRole === 'recycler' ? `
             <div style="background: #eff6ff; padding: 18px; border-radius: var(--radius-sm); border: 2px solid #3b82f6; margin-bottom: 16px;">
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                <label class="form-label" style="color: #1e40af; margin-bottom: 0; font-size: 14px;">
-                  🛡️ ${I18N.t('govRegLabel')}
-                </label>
-                <button type="button" class="btn-secondary" style="font-size: 11px; padding: 3px 8px;" onclick="copyDemoGovNo()">
-                  📋 ${I18N.t('registeredDemoHint')} CPCB/EPR-REC/2023/MH-0842
-                </button>
-              </div>
-              <input type="text" id="loginGovReg" class="form-input" style="font-weight: 800; color: #1e3a8a; text-transform: uppercase;" placeholder="${I18N.t('govRegPlaceholder')}" value="CPCB/EPR-REC/2023/MH-0842">
+              <label class="form-label" style="color: #1e40af; margin-bottom: 10px; font-size: 14px; display: block;">
+                🛡️ ${I18N.t('govRegLabel')}
+              </label>
+              <input type="text" id="loginGovReg" class="form-input" style="font-weight: 800; color: #1e3a8a; text-transform: uppercase;" placeholder="${I18N.t('govRegPlaceholder')}" autocomplete="off">
               <p class="form-help" style="color: #1d4ed8; margin-top: 6px;">
-                ${I18N.t('govRegHelp')}
+                ${I18N.currentLang === 'en'
+                  ? 'First time entering this registration number? It will be registered for you now. Entering it again later signs you back in.'
+                  : I18N.t('govRegHelp')}
               </p>
               <div class="desktop-grid-2" style="margin-top: 12px;">
                 <div>
                   <label class="form-label" style="color:#1e40af; font-size:12.5px;">Recycler Facility Name:</label>
-                  <input type="text" id="loginName" class="form-input" value="MahaGreen E-Waste Recyclers Pvt Ltd">
+                  <input type="text" id="loginName" class="form-input" placeholder="e.g. Green Earth Recyclers Pvt Ltd" autocomplete="off">
                 </div>
                 <div>
                   <label class="form-label" style="color:#1e40af; font-size:12.5px;">Plant Phone Number:</label>
-                  <input type="tel" id="loginPhone" class="form-input" value="9820111223">
+                  <input type="tel" id="loginPhone" class="form-input" placeholder="10-digit mobile number">
                 </div>
               </div>
             </div>
@@ -304,21 +332,8 @@ function renderLoginPage(container) {
     container.innerHTML = updateFormHtml();
   };
 
-  // Helper demo shortcuts
-  window.copyDemoGovNo = () => {
-    const el = document.getElementById('loginGovReg');
-    if (el) el.value = 'CPCB/EPR-REC/2023/MH-0842';
-  };
-
-  window.fillDemoKabadiwala = () => {
-    const phone = document.getElementById('loginPhone');
-    const pin = document.getElementById('loginKabadiPin');
-    if (phone) phone.value = '9820144521';
-    if (pin) pin.value = '4452';
-  };
-
-  // Submit handler
-  window.handleLoginSubmit = () => {
+  // Submit handler — now talks to the real backend instead of scanning in-memory arrays
+  window.handleLoginSubmit = async () => {
     const nameEl = document.getElementById('loginName');
     const phoneEl = document.getElementById('loginPhone');
     const locEl = document.getElementById('loginLocation');
@@ -326,102 +341,66 @@ function renderLoginPage(container) {
     const phone = phoneEl ? phoneEl.value.trim() : '9820000000';
     const location = locEl ? locEl.value.trim() : 'Pune';
 
-    // 1. RECYCLER STRICT ACCESS GUARD
+    // 1. RECYCLER ACCESS (self-service: first login with a new CPCB number registers it for real)
     if (selectedRole === 'recycler') {
       const govRegInput = document.getElementById('loginGovReg');
       const govRegNo = govRegInput ? govRegInput.value.trim().toUpperCase() : '';
-      const matchedRecycler = ESETU_DATA.predefinedRecyclers.find(r => r.cpcbRegNo.toUpperCase() === govRegNo) 
-                            || ESETU_DATA.validCpcbRegistrations.find(r => r.toUpperCase() === govRegNo);
 
-      if (!matchedRecycler) {
-        showGovRegErrorModal(govRegNo);
-        return;
+      try {
+        const coords = await getBrowserCoordinates();
+        const recycler = await API.recyclerLogin({ govRegNo, name, phone, location, ...(coords || {}) });
+
+        // Refresh the shared cache so a newly registered recycler shows up everywhere.
+        const fresh = await API.bootstrap();
+        Object.assign(ESETU_DATA, fresh);
+
+        AppState.user = recycler;
+        localStorage.setItem('esetu_user', JSON.stringify(AppState.user));
+        renderApp();
+      } catch (err) {
+        alert(`❌ ${err.message}`);
       }
-
-      AppState.user = {
-        role: 'recycler',
-        name: typeof matchedRecycler === 'object' ? matchedRecycler.name : name,
-        phone: typeof matchedRecycler === 'object' ? matchedRecycler.phone : phone,
-        location: typeof matchedRecycler === 'object' ? matchedRecycler.facility : location,
-        govRegNo: govRegNo
-      };
-      localStorage.setItem('esetu_user', JSON.stringify(AppState.user));
-      renderApp();
       return;
     }
 
-    // 2. KABADIWALA PREDEFINED ACCESS GUARD
+    // 2. KABADIWALA PREDEFINED ACCESS GUARD (validated server-side against the kabadiwalas table)
     if (selectedRole === 'kabadiwala') {
       if (kabadiMode === 'login') {
         const pinInput = document.getElementById('loginKabadiPin');
         const pin = pinInput ? pinInput.value.trim() : '';
-        const cleanPhone = phone.replace(/\D/g, '');
 
-        // Check against predefined certified dealers
-        const matchedDealer = ESETU_DATA.predefinedKabadiwalas.find(k => k.phone === cleanPhone && k.pin === pin);
-
-        if (!matchedDealer) {
+        try {
+          const dealer = await API.kabadiwalaLogin(phone, pin);
+          AppState.user = { role: 'kabadiwala', name: dealer.name, phone: dealer.phone, location: dealer.location, yard: dealer.yard, kabadiId: dealer.kabadiId };
+          localStorage.setItem('esetu_user', JSON.stringify(AppState.user));
+          renderApp();
+        } catch (err) {
           showKabadiAuthErrorModal(phone);
-          return;
         }
-
-        AppState.user = {
-          role: 'kabadiwala',
-          name: matchedDealer.name,
-          phone: matchedDealer.phone,
-          location: matchedDealer.location,
-          yard: matchedDealer.yard,
-          kabadiId: matchedDealer.kabadiId
-        };
-        localStorage.setItem('esetu_user', JSON.stringify(AppState.user));
-        renderApp();
         return;
       } else {
-        // Register new Kabadiwala
+        // Register new Kabadiwala — a real row is written to the database
         const godownName = document.getElementById('regGodownName') ? document.getElementById('regGodownName').value.trim() : 'My Scrap Yard';
         const vehicleType = document.getElementById('regVehicleType') ? document.getElementById('regVehicleType').value : 'Tata Ace';
-        const newKabadiId = `KAB-REG-${Math.floor(1000 + Math.random() * 9000)}`;
 
-        const newDealer = {
-          kabadiId: newKabadiId,
-          phone: phone.replace(/\D/g, ''),
-          pin: '1234',
-          name: name,
-          yard: godownName,
-          location: location
-        };
-        ESETU_DATA.predefinedKabadiwalas.unshift(newDealer);
+        try {
+          const coords = await getBrowserCoordinates();
+          const dealer = await API.kabadiwalaRegister({ name, phone, yard: godownName, vehicleType, location, ...(coords || {}) });
 
-        // Add to customer view
-        ESETU_DATA.kabadiwalas.unshift({
-          id: newKabadiId,
-          name: `${name} (${godownName})`,
-          nameMr: `${name} (${godownName})`,
-          nameHi: `${name} (${godownName})`,
-          phone: phone,
-          location: location,
-          distanceKm: 0.6,
-          vehicle: `${vehicleType} & Certified Scales`,
-          photo: '👨🏽‍💼',
-          status: 'Online • Verified Partner',
-          rating: 5.0,
-          totalReviews: 1,
-          badge: 'Verified Partner',
-          cashOnCollection: true,
-          reviews: [{ customer: 'System Verification', rating: 5, date: 'Today', text: 'Digital weighing scale verified.' }]
-        });
+          // Refresh the shared cache so the new dealer shows up everywhere (nearby-dealers list, etc.)
+          const fresh = await API.bootstrap();
+          Object.assign(ESETU_DATA, fresh);
 
-        alert(`🎉 Registration Approved! Welcome ${name}. Assigned ID: ${newKabadiId} (Default PIN: 1234).`);
-        AppState.user = {
-          role: 'kabadiwala',
-          name: name,
-          phone: phone,
-          location: location,
-          yard: godownName,
-          kabadiId: newKabadiId
-        };
-        localStorage.setItem('esetu_user', JSON.stringify(AppState.user));
-        renderApp();
+          const smsNote = dealer.sms && dealer.sms.sent
+            ? `\n📩 Today's scrap price list has been sent to ${phone} via SMS.`
+            : `\n⚠️ Price-list SMS not sent (${dealer.sms ? dealer.sms.reason : 'unknown reason'}).`;
+          alert(`🎉 Registration Approved! Welcome ${name}. Assigned ID: ${dealer.kabadiId} (Default PIN: 1234).${smsNote}`);
+          AppState.user = { role: 'kabadiwala', name: dealer.name, phone: dealer.phone, location: dealer.location, yard: dealer.yard, kabadiId: dealer.kabadiId };
+          localStorage.setItem('esetu_user', JSON.stringify(AppState.user));
+          renderApp();
+        } catch (err) {
+          alert(`❌ Registration failed: ${err.message}`);
+        }
         return;
       }
     }
@@ -437,39 +416,7 @@ function renderLoginPage(container) {
     renderApp();
   };
 
-  // Rejection Modal for Fake Recycler
-  window.showGovRegErrorModal = (enteredNumber) => {
-    const modalContainer = document.getElementById('loginErrorModalContainer');
-    if (!modalContainer) return;
-
-    modalContainer.innerHTML = `
-      <div class="modal-overlay">
-        <div class="modal-content" style="border-top: 6px solid #dc2626; max-width: 440px; text-align: center;">
-          <div style="font-size: 44px; margin-bottom: 8px;">🚨</div>
-          <h3 style="font-size: 18px; font-weight: 900; color: #991b1b; margin-bottom: 8px;">
-            ${I18N.currentLang === 'en' ? 'Unauthorized Recycler Access Denied!' : 'अनधिकृत रिसायकलर प्रवेश नाकारला!'}
-          </h3>
-          <div style="background: #fef2f2; border: 1.5px solid #fca5a5; padding: 14px; border-radius: var(--radius-sm); font-size: 13px; color: #7f1d1d; text-align: left; margin: 14px 0;">
-            <p><strong>Input Registration ID:</strong> <code>${enteredNumber || '(Empty)'}</code></p>
-            <p style="margin-top: 6px;">
-              ${I18N.t('govRegError')}
-            </p>
-          </div>
-          <div style="display: flex; flex-direction: column; gap: 8px;">
-            <button class="btn-primary" style="background: #16a34a;" onclick="fillAndCloseDemoCpcb()">
-              📋 Use CPCB Demo License (CPCB/EPR-REC/2023/MH-0842)
-            </button>
-            <button class="btn-secondary" onclick="document.getElementById('loginErrorModalContainer').innerHTML=''">
-              Close
-            </button>
-          </div>
-        </div>
-      </div>
-    `;
-    I18N.speak(I18N.t('govRegError'));
-  };
-
-  // Rejection Modal for Customer attempting Kabadiwala Wholesale Portal
+  // Rejection Modal for a real registered dealer entering the wrong phone/PIN
   window.showKabadiAuthErrorModal = (phone) => {
     const modalContainer = document.getElementById('loginErrorModalContainer');
     if (!modalContainer) return;
@@ -487,29 +434,13 @@ function renderLoginPage(container) {
               ${I18N.t('kabadiAuthError')}
             </p>
           </div>
-          <div style="display: flex; flex-direction: column; gap: 8px;">
-            <button class="btn-primary" style="background: #047857;" onclick="fillDemoDealerAndClose()">
-              📋 Fill Verified Demo Dealer: Raju Shinde (PIN: 4452)
-            </button>
-            <button class="btn-secondary" onclick="document.getElementById('loginErrorModalContainer').innerHTML=''">
-              Close
-            </button>
-          </div>
+          <button class="btn-secondary" onclick="document.getElementById('loginErrorModalContainer').innerHTML=''">
+            Close
+          </button>
         </div>
       </div>
     `;
     I18N.speak(I18N.t('kabadiAuthError'));
-  };
-
-  window.fillAndCloseDemoCpcb = () => {
-    const el = document.getElementById('loginGovReg');
-    if (el) el.value = 'CPCB/EPR-REC/2023/MH-0842';
-    document.getElementById('loginErrorModalContainer').innerHTML = '';
-  };
-
-  window.fillDemoDealerAndClose = () => {
-    fillDemoKabadiwala();
-    document.getElementById('loginErrorModalContainer').innerHTML = '';
   };
 }
 
@@ -521,7 +452,7 @@ function renderLoginPage(container) {
 // -------------------------------------------------------------
 function renderCustomerPage(container) {
   if (!AppState.customerTab) AppState.customerTab = 'sell';
-  if (!AppState.trackedKabadiwala) AppState.trackedKabadiwala = ESETU_DATA.kabadiwalas[0];
+  if (!AppState.trackedKabadiwala) AppState.trackedKabadiwala = ESETU_DATA.kabadiwalas[0] || null;
 
   // Top Tab Navigation for Customer (3 Compact Sub-Pages)
   const tabNavHtml = `
@@ -775,6 +706,18 @@ function renderCustomerSellTab(container, tabNavHtml) {
 // SUB-PAGE 2: NEARBY KABADIWALAS, MAP LINKS & LIVE ETA
 // -------------------------------------------------------------
 function renderCustomerDealersTab(container, tabNavHtml) {
+  if (!ESETU_DATA.kabadiwalas.length) {
+    container.innerHTML = `
+      ${tabNavHtml}
+      <div class="card" style="text-align: center; padding: 48px 24px;">
+        <div style="font-size: 40px; margin-bottom: 10px;">📍</div>
+        <h3 style="font-size: 16px; font-weight: 800; margin-bottom: 6px;">No scrap dealers registered yet in your area</h3>
+        <p style="font-size: 13px; color: var(--text-muted);">Once a Kabadiwala registers on this platform, they'll appear here with live tracking and contact details.</p>
+      </div>
+    `;
+    return;
+  }
+
   const tracked = AppState.trackedKabadiwala || ESETU_DATA.kabadiwalas[0];
   const payout = (AppState.calculatorWeight * AppState.selectedMaterial.customerRate).toFixed(0);
 
@@ -942,9 +885,9 @@ function renderCustomerDealersTab(container, tabNavHtml) {
 // SUB-PAGE 3: CUSTOMER PROFILE & SALES HISTORY
 // -------------------------------------------------------------
 function renderCustomerProfileTab(container, tabNavHtml) {
-  const custName = AppState.user.name || 'Sunita Deshmukh (Eco-Citizen)';
-  const custPhone = AppState.user.phone || '+91 98201 44521';
-  const custLocation = AppState.user.location || 'Kothrud, Pune, Maharashtra';
+  const custName = AppState.user.name || 'Customer';
+  const custPhone = AppState.user.phone || '—';
+  const custLocation = AppState.user.location || '—';
   const summary = ESETU_DATA.customerSalesSummary;
 
   // Comparison Rows with previous months
@@ -1010,7 +953,7 @@ function renderCustomerProfileTab(container, tabNavHtml) {
               </span>
             </div>
             <div style="font-size: 13.5px; font-weight: 700; color: var(--primary-dark); margin-top: 2px;">
-              Preferred Scrap Dealer: <strong>${summary.preferredScrapDealer}</strong>
+              ${summary.preferredScrapDealer ? `Preferred Scrap Dealer: <strong>${summary.preferredScrapDealer}</strong>` : 'No transactions yet'}
             </div>
             <div style="font-size: 12px; color: var(--text-muted); margin-top: 3px;">
               📍 ${custLocation} • 📞 ${custPhone}
@@ -1073,7 +1016,7 @@ function renderCustomerProfileTab(container, tabNavHtml) {
             </tr>
           </thead>
           <tbody>
-            ${monthlyRowsHtml}
+            ${monthlyRowsHtml || `<tr><td colspan="5" style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 12.5px;">No transactions yet</td></tr>`}
           </tbody>
         </table>
       </div>
@@ -1101,7 +1044,7 @@ function renderCustomerProfileTab(container, tabNavHtml) {
             </tr>
           </thead>
           <tbody>
-            ${historyRowsHtml}
+            ${historyRowsHtml || `<tr><td colspan="6" style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 12.5px;">No transactions yet</td></tr>`}
           </tbody>
         </table>
       </div>
@@ -1190,291 +1133,25 @@ window.bookPickupFromKabadiwala = (kabadiName) => {
 // Page 2: Warehouse Stockpile & Wholesale Recyclers Comparison
 // Page 3: Dealer Profile & Daily Collection History Comparisons
 // -------------------------------------------------------------
-let liveMarketEngineInterval = null;
-let marketCountdownInterval = null;
-let marketCountdown = 10;
+// Materials are grouped into segregation categories for display — a static
+// snapshot of recycler buying rates, not a live-updating ticker. Rates only
+// change when a recycler explicitly publishes a new rate (see promptRateUpdate).
+const MATERIAL_CATEGORY_GROUPS = [
+  { key: 'metals', icon: '🔩', en: 'Metals & Wires', hi: 'धातु व तार', mr: 'धातू व तारा', symbols: ['CU-WIRE', 'MOT-MAG'] },
+  { key: 'circuits', icon: '💻', en: 'Circuit Boards', hi: 'सर्किट बोर्ड', mr: 'सर्किट बोर्ड', symbols: ['PCB-HI'] },
+  { key: 'batteries', icon: '🔋', en: 'Batteries', hi: 'बैटरी', mr: 'बॅटरी', symbols: ['LI-BATT'] },
+  { key: 'glass', icon: '📺', en: 'Glass & Displays', hi: 'कांच व डिस्प्ले', mr: 'काच व डिस्प्ले', symbols: ['CRT-GLS', 'LCD-SCR'] },
+  { key: 'plastics', icon: '♻️', en: 'Plastics', hi: 'प्लास्टिक', mr: 'प्लास्टिक', symbols: ['PLAS-MIX'] }
+];
 
-function initLivePriceEngine() {
-  if (liveMarketEngineInterval) clearInterval(liveMarketEngineInterval);
-  if (marketCountdownInterval) clearInterval(marketCountdownInterval);
-
-  marketCountdown = 10;
-  marketCountdownInterval = setInterval(() => {
-    marketCountdown--;
-    if (marketCountdown <= 0) marketCountdown = 10;
-    const timerEls = document.querySelectorAll('.live-timer-tick');
-    timerEls.forEach(el => { el.textContent = `${marketCountdown}s`; });
-  }, 1000);
-
-  liveMarketEngineInterval = setInterval(() => {
-    // Fluctuate each material with realistic market movement
-    ESETU_DATA.materials.forEach(m => {
-      // Random delta between -2.2% and +2.5%
-      const pctShift = (Math.random() * 4.7 - 2.2) / 100;
-      let diff = Math.round(m.recyclerRate * pctShift);
-      if (diff === 0) diff = Math.random() > 0.48 ? 3 : -3;
-      
-      const newPrice = Math.max(10, m.recyclerRate + diff);
-      m.recyclerRate = newPrice;
-
-      // Maintain exactly 10 values in the live sparkline graph
-      if (!m.sparkline || m.sparkline.length === 0) {
-        m.sparkline = [newPrice, newPrice, newPrice, newPrice, newPrice, newPrice, newPrice, newPrice, newPrice, newPrice];
-      }
-      m.sparkline.shift();
-      m.sparkline.push(newPrice);
-
-      // Recalculate dynamic Highs and Lows from the 10 values
-      m.dayHigh = Math.max(...m.sparkline, m.dayHigh || newPrice);
-      m.dayLow = Math.min(...m.sparkline, m.dayLow || newPrice);
-
-      const netShift = newPrice - m.recyclerRate6hrAgo;
-      m.isPositive = netShift >= 0;
-      m.changePct = (netShift >= 0 ? '+' : '') + ((netShift / (m.recyclerRate6hrAgo || 1)) * 100).toFixed(1) + '%';
-    });
-
-    // If Kabadiwala is on Exchange tab, refresh table elements live without losing scroll
-    if (AppState.user && AppState.user.role === 'kabadiwala' && AppState.kabadiwalaTab === 'exchange') {
-      updateExchangeTableLive();
-    }
-  }, 10000); // REPEATEDLY EVERY 10 SECONDS
-}
-
-window.selectHeroMaterial = (matId) => {
-  AppState.selectedExchangeMatId = matId;
-  updateExchangeTableLive();
-};
-
-function updateHeroLiveChart() {
-  const container = document.getElementById('heroLiveChartContainer');
-  if (!container) return;
-
-  if (!AppState.selectedExchangeMatId) {
-    AppState.selectedExchangeMatId = 'cu-wire';
-  }
-  const mat = ESETU_DATA.materials.find(m => m.id === AppState.selectedExchangeMatId) || ESETU_DATA.materials[0];
-  const spark = mat.sparkline && mat.sparkline.length === 10 ? mat.sparkline : [mat.recyclerRate, mat.recyclerRate, mat.recyclerRate, mat.recyclerRate, mat.recyclerRate, mat.recyclerRate, mat.recyclerRate, mat.recyclerRate, mat.recyclerRate, mat.recyclerRate];
-  
-  const min = Math.min(...spark);
-  const max = Math.max(...spark);
-  const range = max - min || 1;
-  const isUp = mat.isPositive;
-  const strokeColor = isUp ? '#16a34a' : '#dc2626';
-
-  // 10 coordinates for viewBox 0 0 680 180
-  const points = spark.map((val, idx) => {
-    const x = 40 + idx * ((640 - 40) / 9);
-    const y = 145 - ((val - min) / range) * 110;
-    return { x, y, val, idx };
-  });
-
-  const polyPoints = points.map(p => `${p.x},${p.y}`).join(' ');
-  const areaPoints = `40,155 ${polyPoints} 640,155`;
-
-  const circlesHtml = points.map((p, idx) => {
-    const isLatest = idx === 9;
-    const isMin = p.val === min;
-    const isMax = p.val === max;
-    const tagBg = isLatest ? '#0f172a' : (isMax ? '#166534' : (isMin ? '#991b1b' : '#334155'));
-    
-    return `
-      <g>
-        ${isLatest ? `<circle cx="${p.x}" cy="${p.y}" r="11" fill="none" stroke="${strokeColor}" stroke-width="2" opacity="0.6">
-          <animate attributeName="r" values="6;14;6" dur="2s" repeatCount="indefinite"/>
-          <animate attributeName="opacity" values="0.8;0;0.8" dur="2s" repeatCount="indefinite"/>
-        </circle>` : ''}
-        <circle cx="${p.x}" cy="${p.y}" r="${isLatest ? 6 : 4.5}" fill="${isLatest ? strokeColor : '#ffffff'}" stroke="${strokeColor}" stroke-width="2.5" />
-        
-        <!-- Numeric Value Tag (Exact 10 Numbers on Graph) -->
-        <rect x="${p.x - 22}" y="${p.y - 25}" width="44" height="17" rx="4" fill="${tagBg}" opacity="0.9" />
-        <text x="${p.x}" y="${p.y - 13}" font-size="10.5" font-family="-apple-system, sans-serif" font-weight="700" fill="#ffffff" text-anchor="middle">
-          ₹${p.val}
-        </text>
-      </g>
-    `;
-  }).join('');
-
-  // Material Chips
-  const chipsHtml = ESETU_DATA.materials.map(m => `
-    <button class="btn-secondary" style="padding: 6px 12px; font-size: 12px; font-weight: 700; border-radius: var(--radius-full); cursor: pointer; ${m.id === mat.id ? 'background: var(--primary); color: #fff; border-color: var(--primary);' : 'background: #f8fafc;'}" onclick="selectHeroMaterial('${m.id}')">
-      ${m.icon} ${m.symbol}
-    </button>
-  `).join('');
-
-  // 10-Value Time Ribbon
-  const ribbonHtml = spark.map((val, idx) => {
-    const isLatest = idx === 9;
-    const timeLabel = isLatest ? 'NOW' : `T-${(9 - idx) * 10}s`;
-    const isPeak = val === max;
-    const isFloor = val === min;
-    
-    return `
-      <div style="flex: 1; min-width: 58px; background: ${isLatest ? '#ecfdf5' : '#f8fafc'}; border: 1.5px solid ${isLatest ? 'var(--primary)' : '#e2e8f0'}; border-radius: 6px; padding: 6px 4px; text-align: center;">
-        <div style="font-size: 10px; color: ${isLatest ? 'var(--primary-dark)' : 'var(--text-muted)'}; font-weight: 800;">
-          ${timeLabel} ${isPeak ? '🏆' : (isFloor ? '🔻' : '')}
-        </div>
-        <div style="font-size: 13px; font-weight: 900; color: ${isLatest ? '#065f46' : 'var(--text-main)'}; margin-top: 2px;">
-          ₹${val}
-        </div>
-      </div>
-    `;
-  }).join('');
-
-  container.innerHTML = `
-    <div class="card" style="margin-bottom: 20px; border-top: 4px solid ${strokeColor}; box-shadow: var(--shadow-md);">
-      <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 14px; margin-bottom: 16px;">
-        <div>
-          <div style="display: flex; align-items: center; gap: 10px;">
-            <span class="live-dot-pulse"></span>
-            <span style="font-size: 12px; font-weight: 800; color: ${strokeColor}; text-transform: uppercase; letter-spacing: 0.5px;">
-              Live Price Stream (Updates Every 10 Seconds)
-            </span>
-            <span style="background: #f1f5f9; font-size: 11.5px; padding: 2px 8px; border-radius: 4px; color: var(--text-muted);">
-              ⏱️ Auto-Tick: <strong class="live-timer-tick" style="color: var(--accent);">${marketCountdown}s</strong>
-            </span>
-          </div>
-          <h2 style="font-size: 22px; font-weight: 900; margin-top: 4px; display: flex; align-items: center; gap: 8px;">
-            ${mat.icon} ${getLocalizedMatName(mat)}
-            <span class="symbol-badge">${mat.symbol}</span>
-          </h2>
-        </div>
-
-        <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-          <div style="text-align: right;">
-            <div style="font-size: 28px; font-weight: 900; color: var(--text-main);">
-              ₹${mat.recyclerRate}<span style="font-size: 14px; color: var(--text-muted); font-weight: 600;">/kg</span>
-            </div>
-            <span class="trend-badge ${isUp ? 'up' : 'down'}" style="font-size: 12px;">
-              ${isUp ? '▲' : '▼'} ${mat.changePct}
-            </span>
-          </div>
-
-          <div style="background: #f8fafc; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 14px; display: flex; gap: 16px; font-size: 12px;">
-            <div>
-              <div style="color: var(--text-muted); font-weight: 700;">SESSION HIGH</div>
-              <div style="color: #166534; font-size: 16px; font-weight: 900;">₹${mat.dayHigh}/kg</div>
-            </div>
-            <div style="border-left: 1px solid var(--border); padding-left: 16px;">
-              <div style="color: var(--text-muted); font-weight: 700;">SESSION LOW</div>
-              <div style="color: #991b1b; font-size: 16px; font-weight: 900;">₹${mat.dayLow}/kg</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Material Switcher Pills -->
-      <div style="display: flex; gap: 8px; overflow-x: auto; padding-bottom: 10px; margin-bottom: 14px;">
-        ${chipsHtml}
-      </div>
-
-      <!-- High-Resolution Live SVG Graph with 10 Points -->
-      <div style="background: linear-gradient(to bottom, #ffffff, #f8fafc); border: 1.5px solid var(--border); border-radius: var(--radius-sm); padding: 12px 6px 4px 6px; position: relative;">
-        <svg viewBox="0 0 680 180" style="width: 100%; height: auto; display: block; overflow: visible;">
-          <defs>
-            <linearGradient id="liveAreaGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stop-color="${strokeColor}" stop-opacity="0.25"/>
-              <stop offset="100%" stop-color="${strokeColor}" stop-opacity="0.0"/>
-            </linearGradient>
-          </defs>
-
-          <!-- Horizontal Guide Grid Lines -->
-          <line x1="30" y1="35" x2="650" y2="35" stroke="#e2e8f0" stroke-dasharray="4,4" stroke-width="1"/>
-          <text x="32" y="30" font-size="9" font-weight="700" fill="#166534">HIGH ₹${mat.dayHigh}</text>
-
-          <line x1="30" y1="90" x2="650" y2="90" stroke="#f1f5f9" stroke-width="1"/>
-
-          <line x1="30" y1="145" x2="650" y2="145" stroke="#e2e8f0" stroke-dasharray="4,4" stroke-width="1"/>
-          <text x="32" y="141" font-size="9" font-weight="700" fill="#991b1b">LOW ₹${mat.dayLow}</text>
-
-          <!-- Filled Area Under Curve -->
-          <polygon points="${areaPoints}" fill="url(#liveAreaGrad)"/>
-
-          <!-- 10-Point Connecting Polyline -->
-          <polyline fill="none" stroke="${strokeColor}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" points="${polyPoints}"/>
-
-          <!-- 10 Circular Data Vertices & Numeric Value Callouts -->
-          ${circlesHtml}
-        </svg>
-
-        <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); padding: 6px 12px 0 12px; border-top: 1px solid #f1f5f9;">
-          <span>⏮️ 90 Seconds Ago (Tick 1)</span>
-          <span style="font-weight: 700; color: var(--primary);">⏱️ 10-Second Fluctuating Sparkline (10 Values)</span>
-          <span style="font-weight: 700; color: ${strokeColor};">🔴 Current Market Tick (Tick 10) ⏭️</span>
-        </div>
-      </div>
-
-      <!-- 10-Point Ledger Ribbon Displaying All 10 Numbers -->
-      <div style="margin-top: 14px;">
-        <div style="font-size: 11.5px; font-weight: 800; color: var(--text-muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">
-          📋 Live 10-Value Numerical History Array (Rolling Window):
-        </div>
-        <div style="display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px;">
-          ${ribbonHtml}
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-function updateExchangeTableLive() {
-  updateHeroLiveChart();
-
-  const tbody = document.getElementById('liveExchangeTableBody');
-  if (!tbody) return;
-
-  tbody.innerHTML = ESETU_DATA.materials.map(m => {
-    const isUp = m.isPositive;
-    const cls = isUp ? 'up' : 'down';
-    const arrow = isUp ? '▲' : '▼';
-
-    const min = Math.min(...m.sparkline);
-    const max = Math.max(...m.sparkline);
-    const points = m.sparkline.map((val, idx) => {
-      const x = (idx / (m.sparkline.length - 1)) * 90 + 2;
-      const y = 26 - ((val - min) / (max - min || 1)) * 22;
-      return `${x},${y}`;
-    }).join(' ');
-
-    return `
-      <tr style="animation: pulseHighlight 0.5s ease; cursor: pointer;" onclick="selectHeroMaterial('${m.id}')" title="Click to view full 10-point live graph">
-        <td style="padding: 12px 8px;">
-          <span class="symbol-badge">${m.symbol}</span>
-          <div style="font-size: 12.5px; color: var(--text-muted); margin-top: 2px;">${m.icon} ${getLocalizedMatName(m).split('(')[0]}</div>
-        </td>
-        <td style="padding: 12px 8px;">
-          <strong style="font-size: 16px; color: var(--text-main);">₹${m.recyclerRate}/kg</strong>
-          <div style="font-size: 11px; color: var(--text-muted);">6h: ₹${m.recyclerRate6hrAgo}</div>
-        </td>
-        <td style="padding: 12px 8px;">
-          <span class="trend-badge ${cls}">${arrow} ${m.changePct}</span>
-        </td>
-        <td style="padding: 12px 8px; color: #166534; font-weight: 700;">
-          ₹${m.dayHigh}/kg
-        </td>
-        <td style="padding: 12px 8px; color: #991b1b; font-weight: 700;">
-          ₹${m.dayLow}/kg
-        </td>
-        <td style="padding: 12px 8px; min-width: 220px;">
-          <svg style="width: 100px; height: 28px; vertical-align: middle;">
-            <polyline fill="none" stroke="${isUp ? '#16a34a' : '#dc2626'}" stroke-width="2.5" points="${points}" />
-          </svg>
-          <div style="font-size: 10.5px; font-family: monospace; color: #1e293b; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; padding: 2px 6px; margin-top: 4px;">
-            <strong>10 ticks:</strong> [${m.sparkline.map(v => '₹' + v).join(', ')}]
-          </div>
-        </td>
-        <td style="padding: 12px 8px;">
-          <button class="btn-primary" style="padding: 6px 12px; font-size: 12px; width: auto;" onclick="event.stopPropagation(); openCreateLotModal('${ESETU_DATA.recyclers[0].id}', '${ESETU_DATA.recyclers[0].name}')">
-            Sell Lot
-          </button>
-        </td>
-      </tr>
-    `;
-  }).join('');
+function groupLabel(group) {
+  if (I18N.currentLang === 'mr') return group.mr;
+  if (I18N.currentLang === 'hi') return group.hi;
+  return group.en;
 }
 
 function renderKabadiwalaPage(container) {
   if (!AppState.kabadiwalaTab) AppState.kabadiwalaTab = 'exchange';
-  initLivePriceEngine();
 
   // Top Tab Navigation for Kabadiwala (3 Sub-Pages)
   const tabNavHtml = `
@@ -1482,7 +1159,7 @@ function renderKabadiwalaPage(container) {
       <button class="btn-secondary ${AppState.kabadiwalaTab === 'exchange' ? 'btn-primary' : ''}" 
               style="flex: 1; padding: 10px; font-size: 13.5px; font-weight: 700;" 
               onclick="setKabadiwalaTab('exchange')">
-        📈 ${I18N.currentLang === 'en' ? 'Live Commodity Exchange' : 'लाइव्ह कमोडिटी मार्केट'}
+        📈 ${I18N.currentLang === 'en' ? 'Commodity Exchange' : 'कमोडिटी मार्केट'}
       </button>
       <button class="btn-secondary ${AppState.kabadiwalaTab === 'warehouse' ? 'btn-primary' : ''}" 
               style="flex: 1; padding: 10px; font-size: 13.5px; font-weight: 700;" 
@@ -1514,65 +1191,94 @@ window.setKabadiwalaTab = (tabName) => {
 };
 
 // -------------------------------------------------------------
-// SUB-PAGE 1: LIVE SCRAP COMMODITY EXCHANGE (10-SEC LIVE GRAPH)
+// SUB-PAGE 1: WHOLESALE COMMODITY RATES — SEGREGATED BY MATERIAL TYPE
+// Static snapshot; rates change only when a recycler publishes a new one.
 // -------------------------------------------------------------
 function renderKabadiwalaExchangeTab(container, tabNavHtml) {
+  const groupsHtml = MATERIAL_CATEGORY_GROUPS.map(group => {
+    const materials = ESETU_DATA.materials.filter(m => group.symbols.includes(m.symbol));
+    if (materials.length === 0) return '';
+
+    const rowsHtml = materials.map(m => {
+      const isUp = m.isPositive;
+      const cls = isUp ? 'up' : 'down';
+      const arrow = isUp ? '▲' : '▼';
+
+      return `
+        <tr style="border-bottom: 1px solid var(--border);">
+          <td style="padding: 12px 8px;">
+            <span class="symbol-badge">${m.symbol}</span>
+            <div style="font-size: 12.5px; color: var(--text-muted); margin-top: 2px;">${m.icon} ${getLocalizedMatName(m).split('(')[0]}</div>
+          </td>
+          <td style="padding: 12px 8px;">
+            <strong style="font-size: 16px; color: var(--text-main);">₹${m.recyclerRate}/kg</strong>
+            <div style="font-size: 11px; color: var(--text-muted);">Previous: ₹${m.recyclerRate6hrAgo}</div>
+          </td>
+          <td style="padding: 12px 8px;">
+            <span class="trend-badge ${cls}">${arrow} ${m.changePct}</span>
+          </td>
+          <td style="padding: 12px 8px; color: #166534; font-weight: 700;">₹${m.dayHigh}/kg</td>
+          <td style="padding: 12px 8px; color: #991b1b; font-weight: 700;">₹${m.dayLow}/kg</td>
+          <td style="padding: 12px 8px;">
+            ${ESETU_DATA.recyclers.length ? `
+              <button class="btn-primary" style="padding: 6px 12px; font-size: 12px; width: auto;" onclick="openCreateLotModal('${ESETU_DATA.recyclers[0].id}', '${ESETU_DATA.recyclers[0].name}')">
+                Sell Lot
+              </button>
+            ` : `
+              <span style="font-size: 11px; color: var(--text-muted);">No recyclers registered yet</span>
+            `}
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    return `
+      <div class="card" style="margin-bottom: 16px;">
+        <div class="card-header" style="margin-bottom: 10px; padding-bottom: 8px;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 22px;">${group.icon}</span>
+            <h3 class="card-title" style="font-size: 15.5px;">${groupLabel(group)}</h3>
+          </div>
+        </div>
+        <div style="overflow-x: auto;">
+          <table class="stock-ticker-table">
+            <thead>
+              <tr>
+                <th>Material</th>
+                <th>Recycler Buying Rate</th>
+                <th>Change</th>
+                <th>Day High</th>
+                <th>Day Low</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  }).join('');
+
   container.innerHTML = `
     ${tabNavHtml}
 
-    <!-- Live Market Ticker Tape with 10-sec Countdown Indicator -->
+    <!-- Wholesale Rate Snapshot Banner (static — updates only when a recycler publishes new rates) -->
     <div style="background:#0f172a; color:#fff; padding:12px 20px; border-radius:var(--radius-sm); margin-bottom:20px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
       <div style="display: flex; align-items: center; gap: 10px;">
-        <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#22c55e; box-shadow:0 0 8px #22c55e;"></span>
-        <strong style="color:#38bdf8; font-size:14px; letter-spacing:0.5px;">LIVE WHOLESALE COMMODITY EXCHANGE</strong>
+        <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#22c55e;"></span>
+        <strong style="color:#38bdf8; font-size:14px; letter-spacing:0.5px;">WHOLESALE COMMODITY RATES</strong>
+        <span style="background: rgba(255,255,255,0.1); font-size: 11.5px; padding: 3px 9px; border-radius: 4px; color: #cbd5e1;">Segregated by material type</span>
       </div>
-      <div style="display: flex; align-items: center; gap: 14px; font-size: 13px;">
-        <span style="background: rgba(255,255,255,0.1); padding: 4px 10px; border-radius: 4px;">
-          ⏱️ Rate Auto-Tick: <strong class="live-timer-tick" style="color: #facc15;">${marketCountdown}s</strong>
-        </span>
-        <button class="audio-btn" style="background:#1e293b; color:#38bdf8; border:1px solid #334155;" onclick="I18N.speak('Live Scrap Exchange. Real-time rates updating every 10 seconds.')">
-          ${I18N.t('speakBtn')}
-        </button>
-      </div>
+      <button class="audio-btn" style="background:#1e293b; color:#38bdf8; border:1px solid #334155;" onclick="I18N.speak('Wholesale scrap rates by category. Rates update only when a recycler publishes new prices.')">
+        ${I18N.t('speakBtn')}
+      </button>
     </div>
 
-    <!-- Featured Live 10-Point Scrap Price Graph Card -->
-    <div id="heroLiveChartContainer"></div>
-
-    <!-- Live Ticker Table -->
-    <div class="card">
-      <div class="card-header">
-        <div>
-          <h3 class="card-title">${I18N.t('stockExchangeTitle')}</h3>
-          <p class="card-subtitle">Real-time commodity graph updating every 10 seconds with 10 price points, daily highs & lows</p>
-        </div>
-      </div>
-
-      <div style="overflow-x: auto;">
-        <table class="stock-ticker-table">
-          <thead>
-            <tr>
-              <th>Commodity Stream</th>
-              <th>Current Bid</th>
-              <th>Change</th>
-              <th>Day High</th>
-              <th>Day Low</th>
-              <th>Live 10-Point Trend Graph</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody id="liveExchangeTableBody">
-            <!-- Injected by updateExchangeTableLive() -->
-          </tbody>
-        </table>
-      </div>
-    </div>
+    ${groupsHtml}
 
     <!-- Modal Container -->
     <div id="lotModalContainer"></div>
   `;
-
-  updateExchangeTableLive();
 }
 
 // -------------------------------------------------------------
@@ -1655,17 +1361,16 @@ function renderKabadiwalaWarehouseTab(container, tabNavHtml) {
             <div style="color: var(--text-muted); font-size: 11px;">⏰ <strong>Gate Hours:</strong> ${r.operatingHours}</div>
           </div>
 
-          <!-- Live Recycler Buying Rates -->
+          <!-- Live Recycler Buying Rates (the platform's shared, real-time material rates) -->
           <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px;">
-            <span style="background:#ecfdf5; color:#065f46; font-size:11.5px; padding:3px 7px; border-radius:4px; font-weight:700;">
-              PCB: ₹${r.rates['PCB-HI']}/kg
-            </span>
-            <span style="background:#ecfdf5; color:#065f46; font-size:11.5px; padding:3px 7px; border-radius:4px; font-weight:700;">
-              Copper: ₹${r.rates['CU-WIRE']}/kg
-            </span>
-            <span style="background:#ecfdf5; color:#065f46; font-size:11.5px; padding:3px 7px; border-radius:4px; font-weight:700;">
-              Li-Batt: ₹${r.rates['LI-BATT']}/kg
-            </span>
+            ${['PCB-HI', 'CU-WIRE', 'LI-BATT'].map(sym => {
+              const mat = ESETU_DATA.materials.find(m => m.symbol === sym);
+              return mat ? `
+                <span style="background:#ecfdf5; color:#065f46; font-size:11.5px; padding:3px 7px; border-radius:4px; font-weight:700;">
+                  ${mat.symbol}: ₹${mat.recyclerRate}/kg
+                </span>
+              ` : '';
+            }).join('')}
           </div>
         </div>
 
@@ -1677,6 +1382,9 @@ function renderKabadiwalaWarehouseTab(container, tabNavHtml) {
             </a>
             <button class="btn-primary" style="width: 100%; padding: 8px; font-size: 12px;" onclick="openCreateLotModal('${r.id}', '${r.name}')">
               ${I18N.t('createLotBtn')}
+            </button>
+            <button class="btn-secondary" style="width: 100%; padding: 8px; font-size: 12px;" onclick="openConnectChatModal('${AppState.user.phone}', '${AppState.user.name}', '${r.id}', '${r.name}', 'kabadiwala', '${AppState.user.name}')">
+              💬 Connect via EcoScrap AI App
             </button>
           </div>
 
@@ -1767,13 +1475,21 @@ function renderKabadiwalaWarehouseTab(container, tabNavHtml) {
           <p class="card-subtitle">Dispatch lots to authorized CPCB green recyclers with verified digital weighbridges & live dispatch tracking</p>
         </div>
         <span class="badge" style="background: #e0f2fe; color: #0369a1; font-weight: 700; padding: 6px 12px; font-size: 12px;">
-          🟢 3 Recyclers Connected
+          🟢 ${ESETU_DATA.recyclers.length} Recycler${ESETU_DATA.recyclers.length === 1 ? '' : 's'} Connected
         </span>
       </div>
 
-      <div class="desktop-grid-3" style="gap: 16px;">
-        ${recyclersHtml}
-      </div>
+      ${ESETU_DATA.recyclers.length ? `
+        <div class="desktop-grid-3" style="gap: 16px;">
+          ${recyclersHtml}
+        </div>
+      ` : `
+        <div style="text-align: center; padding: 40px 20px; color: var(--text-muted);">
+          <div style="font-size: 36px; margin-bottom: 8px;">🏭</div>
+          <p style="font-size: 13.5px; font-weight: 700;">No recyclers registered yet</p>
+          <p style="font-size: 12.5px; margin-top: 4px;">Once a recycler registers on this platform, they'll appear here for lot handover.</p>
+        </div>
+      `}
     </div>
 
     <!-- Modal Container -->
@@ -1785,11 +1501,11 @@ function renderKabadiwalaWarehouseTab(container, tabNavHtml) {
 // SUB-PAGE 3: KABADIWALA PROFILE & DAILY COLLECTION COMPARISONS
 // -------------------------------------------------------------
 function renderKabadiwalaProfileTab(container, tabNavHtml) {
-  const dealerName = AppState.user.name || 'Raju Shinde';
-  const yardName = AppState.user.yard || 'Shinde Scrap Traders';
-  const dealerId = AppState.user.kabadiId || 'KAB-MH-4452';
-  const phone = AppState.user.phone || '+91 98201 44521';
-  const location = AppState.user.location || 'Kothrud / Karve Road, Pune';
+  const dealerName = AppState.user.name || 'Dealer';
+  const yardName = AppState.user.yard || 'Scrap Yard';
+  const dealerId = AppState.user.kabadiId || '—';
+  const phone = AppState.user.phone || '—';
+  const location = AppState.user.location || '—';
 
   // Calculate totals from daily collection history
   const totalWeeklyKg = ESETU_DATA.dailyCollectionHistory.reduce((sum, d) => sum + d.weightKg, 0);
@@ -1864,9 +1580,12 @@ function renderKabadiwalaProfileTab(container, tabNavHtml) {
           <span style="background: #eff6ff; color: #1e40af; padding: 4px 12px; border-radius: var(--radius-full); font-size: 12.5px; font-weight: 700;">
             ⚖️ Certified Electronic Scale Verified
           </span>
-          <div style="margin-top: 8px;">
+          <div style="margin-top: 8px; display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap;">
             <button class="audio-btn" onclick="I18N.speak('Profile for ${dealerName}, owner of ${yardName}. Total weekly collections: ${totalWeeklyKg} kilograms across ${totalItemsCount} transactions.')">
               ${I18N.t('speakBtn')}
+            </button>
+            <button class="btn-secondary" style="font-size: 12px; padding: 6px 12px;" onclick="resendPriceListSms('${dealerId}', '${phone}')">
+              📩 Resend Price List SMS
             </button>
           </div>
         </div>
@@ -1915,7 +1634,7 @@ function renderKabadiwalaProfileTab(container, tabNavHtml) {
             </tr>
           </thead>
           <tbody>
-            ${historyRowsHtml}
+            ${historyRowsHtml || `<tr><td colspan="5" style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 12.5px;">No collections recorded yet</td></tr>`}
           </tbody>
         </table>
       </div>
@@ -2052,37 +1771,27 @@ function renderKabadiwalaProfileTab(container, tabNavHtml) {
     document.getElementById('lotModalContainer').innerHTML = '';
   };
 
-  window.confirmLotCreation = (lotNo, recyclerId, recyclerName) => {
+  window.confirmLotCreation = async (lotNo, recyclerId, recyclerName) => {
     const matId = document.getElementById('modalMatSelect').value;
     const weight = Number(document.getElementById('modalWeightInput').value) || 50;
     const payMode = document.getElementById('modalPaySelect').value;
-    const mat = ESETU_DATA.materials.find(m => m.id === matId);
 
-    const newLot = {
-      lotId: lotNo,
-      date: 'Just now',
-      kabadiwalaId: AppState.user.phone,
-      kabadiwalaName: AppState.user.name,
-      recyclerId: recyclerId,
-      recyclerName: recyclerName,
-      material: mat ? mat.name : 'Electronic Scrap',
-      symbol: mat ? mat.symbol : 'ESCRAP',
-      weightKg: weight,
-      agreedRate: mat ? mat.recyclerRate : 400,
-      totalAmount: weight * (mat ? mat.recyclerRate : 400),
-      paymentMethod: payMode,
-      paymentStatus: 'Pending Inspection',
-      status: 'In Transit / Gate Handover Booked',
-      gpsLocation: '18.5074° N, 73.8077° E',
-      cpcbManifestNo: `MH-EPR-MAN-${Math.floor(100000 + Math.random() * 900000)}`,
-      eprCertIssued: false
-    };
+    try {
+      const newLot = await API.createLot({
+        kabadiwalaId: AppState.user.phone,
+        kabadiwalaName: AppState.user.name,
+        recyclerId, recyclerName,
+        materialId: matId, weightKg: weight, paymentMethod: payMode
+      });
 
-    ESETU_DATA.lots.unshift(newLot);
-    closeLotModal();
-    alert(`✅ Lot ${lotNo} generated and transmitted to ${recyclerName}!`);
-    I18N.speak(`Lot generated and sent to ${recyclerName}.`);
-    renderKabadiwalaPage(container);
+      ESETU_DATA.lots.unshift(newLot);
+      closeLotModal();
+      alert(`✅ Lot ${newLot.lotId} generated and transmitted to ${recyclerName}!`);
+      I18N.speak(`Lot generated and sent to ${recyclerName}.`);
+      renderKabadiwalaPage(container);
+    } catch (err) {
+      alert(`❌ Could not create lot: ${err.message}`);
+    }
   };
 
 // -------------------------------------------------------------
@@ -2132,6 +1841,10 @@ function renderRecyclerPage(container) {
           <button class="btn-secondary" style="flex:1; padding: 10px; font-size: 13px;" onclick="viewEprCertificate('${lot.lotId}')">
             ${isVerified ? '📜 View CPCB EPR Certificate' : I18N.t('issueCertBtn')}
           </button>
+
+          <button class="btn-secondary" style="flex:1; padding: 10px; font-size: 13px;" onclick="openConnectChatModal('${lot.kabadiwalaId}', '${lot.kabadiwalaName}', '${lot.recyclerId}', '${lot.recyclerName}', 'recycler', '${AppState.user.name}')">
+            💬 Connect
+          </button>
         </div>
       </div>
     `;
@@ -2151,7 +1864,7 @@ function renderRecyclerPage(container) {
               ${AppState.user.name}
             </div>
             <div style="font-size: 12px; color: #2563eb; font-family: monospace;">
-              CPCB Registration ID: ${AppState.user.govRegNo || 'CPCB/EPR-REC/2023/MH-0842'}
+              CPCB Registration ID: ${AppState.user.govRegNo || '—'}
             </div>
           </div>
         </div>
@@ -2171,13 +1884,24 @@ function renderRecyclerPage(container) {
               <h3 class="card-title">${I18N.t('incomingLotsTitle')}</h3>
               <p class="card-subtitle">Automated weighbridge confirmation & payment settlement</p>
             </div>
-            <button class="audio-btn" onclick="I18N.speak('${I18N.t('incomingLotsTitle')}')">
-              ${I18N.t('speakBtn')}
-            </button>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn-secondary" style="padding: 6px 12px; font-size: 12px;" onclick="refreshRecyclerLots()">
+                🔄 Refresh
+              </button>
+              <button class="audio-btn" onclick="I18N.speak('${I18N.t('incomingLotsTitle')}')">
+                ${I18N.t('speakBtn')}
+              </button>
+            </div>
           </div>
 
           <div>
-            ${lotsHtml}
+            ${ESETU_DATA.lots.length ? lotsHtml : `
+              <div style="text-align: center; padding: 36px 20px; color: var(--text-muted);">
+                <div style="font-size: 34px; margin-bottom: 8px;">📭</div>
+                <p style="font-size: 13.5px; font-weight: 700;">No incoming lots yet</p>
+                <p style="font-size: 12.5px; margin-top: 4px;">Once a Kabadiwala dispatches a lot to your facility, it'll show up here.</p>
+              </div>
+            `}
           </div>
         </div>
       </div>
@@ -2205,6 +1929,15 @@ function renderRecyclerPage(container) {
               </div>
             `).join('')}
           </div>
+
+          <div style="margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border);">
+            <button class="btn-primary" style="width: 100%; padding: 10px; font-size: 13px;" onclick="triggerDailyPriceBroadcast()">
+              📩 Send Today's Price List to All Registered Dealers (SMS)
+            </button>
+            <p style="font-size: 11px; color: var(--text-muted); margin-top: 6px; text-align: center;">
+              Normally fires automatically every morning — this sends it right now for the demo.
+            </p>
+          </div>
         </div>
       </div>
     </div>
@@ -2213,27 +1946,47 @@ function renderRecyclerPage(container) {
   `;
 
   // Window helpers for recycler actions
-  window.confirmRecyclerPayment = (lotId) => {
-    const lot = ESETU_DATA.lots.find(l => l.lotId === lotId);
-    if (!lot) return;
-
-    lot.paymentStatus = 'Paid';
-    lot.status = 'Recycled & Verified';
-    lot.eprCertIssued = true;
-    alert(`✅ Lot ${lotId} approved. ₹${lot.totalAmount.toLocaleString('en-IN')} paid and CPCB Form-6 certificate generated!`);
-    I18N.speak(`Payment confirmed for Lot ${lotId}. Certificate issued.`);
-    renderRecyclerPage(container);
+  window.confirmRecyclerPayment = async (lotId) => {
+    try {
+      const updated = await API.confirmLotPayment(lotId);
+      const idx = ESETU_DATA.lots.findIndex(l => l.lotId === lotId);
+      if (idx !== -1) ESETU_DATA.lots[idx] = updated;
+      alert(`✅ Lot ${lotId} approved. ₹${updated.totalAmount.toLocaleString('en-IN')} paid and CPCB Form-6 certificate generated!`);
+      I18N.speak(`Payment confirmed for Lot ${lotId}. Certificate issued.`);
+      renderRecyclerPage(container);
+    } catch (err) {
+      alert(`❌ Could not confirm payment: ${err.message}`);
+    }
   };
 
-  window.promptRateUpdate = (matId) => {
+  window.promptRateUpdate = async (matId) => {
     const mat = ESETU_DATA.materials.find(m => m.id === matId);
     if (!mat) return;
     const newRate = prompt(`Enter new buying rate per kg for ${mat.name}:`, mat.recyclerRate);
     if (newRate && !isNaN(newRate)) {
-      mat.recyclerRate = Number(newRate);
-      alert(`✅ Updated: ${mat.symbol} rate is now ₹${newRate}/kg.`);
-      renderRecyclerPage(container);
+      try {
+        const updated = await API.updateMaterialRate(matId, { recyclerRate: Number(newRate) });
+        Object.assign(mat, updated);
+        alert(`✅ Updated: ${mat.symbol} rate is now ₹${newRate}/kg.`);
+        renderRecyclerPage(container);
+      } catch (err) {
+        alert(`❌ Could not update rate: ${err.message}`);
+      }
     }
+  };
+
+  window.triggerDailyPriceBroadcast = async () => {
+    try {
+      const result = await API.triggerDailyPriceListBroadcast();
+      alert(`📩 Price list SMS sent to ${result.sentCount} of ${result.total} registered dealers.`);
+    } catch (err) {
+      alert(`❌ Broadcast failed: ${err.message}`);
+    }
+  };
+
+  window.refreshRecyclerLots = async () => {
+    ESETU_DATA.lots = await API.listLots();
+    renderRecyclerPage(container);
   };
 
   window.viewEprCertificate = (lotId) => {
@@ -2259,7 +2012,7 @@ function renderRecyclerPage(container) {
           <div style="background: #f8fafc; border: 1.5px solid var(--border); padding: 14px; border-radius: var(--radius-sm); font-size: 13px; line-height: 1.6;">
             <div><strong>Certificate ID:</strong> CPCB-EPR-CERT-${lot.lotId}</div>
             <div><strong>Authorized Recycler:</strong> ${AppState.user.name}</div>
-            <div><strong>CPCB Reg No:</strong> ${AppState.user.govRegNo || 'CPCB/EPR-REC/2023/MH-0842'}</div>
+            <div><strong>CPCB Reg No:</strong> ${AppState.user.govRegNo || '—'}</div>
             <div><strong>Source Collector:</strong> ${lot.kabadiwalaName}</div>
             <div><strong>Material Stream:</strong> ${lot.material}</div>
             <div><strong>Net Verified Weight:</strong> ${lot.weightKg} kg</div>
@@ -2332,7 +2085,110 @@ window.openSafetyModal = () => {
   `;
 };
 
+// -------------------------------------------------------------
+// DIRECT IN-APP CONNECT — one chat thread per Kabadiwala <-> Recycler pair
+// -------------------------------------------------------------
+let connectChatPollInterval = null;
+let connectChatThread = null; // { kabadiwalaId, recyclerId, myRole }
+
+async function refreshConnectChatMessages() {
+  if (!connectChatThread) return;
+  const { kabadiwalaId, recyclerId, myRole } = connectChatThread;
+  const listEl = document.getElementById('connectChatMessages');
+  if (!listEl) return;
+
+  try {
+    const messages = await API.listMessages(kabadiwalaId, recyclerId);
+    listEl.innerHTML = messages.length ? messages.map(m => {
+      const isMine = m.senderRole === myRole;
+      return `
+        <div style="align-self: ${isMine ? 'flex-end' : 'flex-start'}; max-width: 80%; background: ${isMine ? 'var(--primary)' : '#fff'}; color: ${isMine ? '#fff' : 'var(--text-main)'}; border: ${isMine ? 'none' : '1px solid var(--border)'}; padding: 8px 12px; border-radius: 12px; font-size: 13px;">
+          <div style="font-size: 10.5px; opacity: 0.8; font-weight: 700; margin-bottom: 2px;">${m.senderName}</div>
+          <div>${m.body.replace(/</g, '&lt;')}</div>
+        </div>
+      `;
+    }).join('') : `<div style="text-align:center; color: var(--text-muted); font-size: 12.5px; padding: 20px;">No messages yet. Say hello 👋</div>`;
+    listEl.scrollTop = listEl.scrollHeight;
+  } catch (err) {
+    // Silent — keep last known state, next poll tick will retry.
+  }
+}
+
+window.openConnectChatModal = async (kabadiwalaId, kabadiwalaName, recyclerId, recyclerName, myRole, myName) => {
+  let modalContainer = document.getElementById('connectChatModalOverlay');
+  if (!modalContainer) {
+    modalContainer = document.createElement('div');
+    modalContainer.id = 'connectChatModalOverlay';
+    document.body.appendChild(modalContainer);
+  }
+
+  const otherPartyName = myRole === 'kabadiwala' ? recyclerName : kabadiwalaName;
+  connectChatThread = { kabadiwalaId, recyclerId, myRole };
+
+  modalContainer.innerHTML = `
+    <div class="modal-overlay">
+      <div class="modal-content" style="max-width: 480px; display: flex; flex-direction: column; max-height: 80vh;">
+        <button class="modal-close" onclick="closeConnectChatModal()">✕</button>
+        <h3 style="font-size: 17px; font-weight: 800; margin-bottom: 4px;">💬 ${otherPartyName}</h3>
+        <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">Direct In-App Connect</p>
+        <div id="connectChatMessages" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 8px; background: #f8fafc; border-radius: var(--radius-sm); min-height: 200px; max-height: 320px;"></div>
+        <div style="display: flex; gap: 8px; margin-top: 10px;">
+          <input type="text" id="connectChatInput" class="form-input" placeholder="Type a message..." style="flex: 1;" onkeydown="if(event.key==='Enter') sendConnectChatMessage('${(myName || '').replace(/'/g, "\\'")}')">
+          <button class="btn-primary" style="width: auto; padding: 10px 16px;" onclick="sendConnectChatMessage('${(myName || '').replace(/'/g, "\\'")}')">Send</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  await refreshConnectChatMessages();
+
+  if (connectChatPollInterval) clearInterval(connectChatPollInterval);
+  connectChatPollInterval = setInterval(refreshConnectChatMessages, 3000);
+};
+
+window.closeConnectChatModal = () => {
+  if (connectChatPollInterval) { clearInterval(connectChatPollInterval); connectChatPollInterval = null; }
+  connectChatThread = null;
+  const modalContainer = document.getElementById('connectChatModalOverlay');
+  if (modalContainer) modalContainer.innerHTML = '';
+};
+
+window.sendConnectChatMessage = async (myName) => {
+  if (!connectChatThread) return;
+  const input = document.getElementById('connectChatInput');
+  if (!input || !input.value.trim()) return;
+
+  const body = input.value.trim();
+  input.value = '';
+
+  try {
+    await API.sendMessage({
+      kabadiwalaId: connectChatThread.kabadiwalaId,
+      recyclerId: connectChatThread.recyclerId,
+      senderRole: connectChatThread.myRole,
+      senderName: myName,
+      body
+    });
+    await refreshConnectChatMessages();
+  } catch (err) {
+    alert(`❌ Could not send message: ${err.message}`);
+  }
+};
+
 // Global Helpers
+window.resendPriceListSms = async (kabadiId, phone) => {
+  try {
+    const result = await API.sendPriceListSms(kabadiId);
+    if (result.sent) {
+      alert(`📩 Today's scrap price list SMS sent to ${phone}.`);
+    } else {
+      alert(`⚠️ SMS not sent: ${result.reason}`);
+    }
+  } catch (err) {
+    alert(`❌ Could not send SMS: ${err.message}`);
+  }
+};
+
 function getLocalizedMatName(mat) {
   if (I18N.currentLang === 'en') return mat.name;
   if (I18N.currentLang === 'ta' && mat.nameTa) return mat.nameTa;

@@ -14,13 +14,15 @@
 
 ## 🚀 How to Run
 
-Simply open `index.html` in any modern browser (Chrome, Edge, Firefox). No server or installation needed.
+This is now a real full-stack app: a Node/Express backend backed by a persistent SQLite database (via Node's built-in `node:sqlite`), serving the existing frontend.
 
 ```
-# Or serve locally:
-python -m http.server 8080
-# Then visit http://localhost:8080
+npm install
+npm start
+# Then visit http://localhost:3000
 ```
+
+Data (materials & rates, registered kabadiwalas/recyclers, lots/transactions, safety guides) lives in `data/esetu.db` and survives server restarts. The database is seeded once from `server/seed-data.js` the first time it's created.
 
 ## 🔑 Demo Credentials
 
@@ -38,9 +40,15 @@ EcoScrap AI/
 ├── index.html          # Main entry point
 ├── css/style.css       # Full responsive stylesheet
 ├── js/
-│   ├── app.js          # Application controller & all views
-│   ├── datasets.js     # Predefined data, credentials & recycler info
-│   └── i18n.js         # 7-language translation engine
+│   ├── api.js           # Fetch client for the backend REST API
+│   ├── app.js            # Application controller & all views
+│   └── i18n.js           # 7-language translation engine
+├── server/
+│   ├── server.js         # Express app: serves the API + the static frontend
+│   ├── api.js             # REST API routes (/api/*)
+│   ├── db.js               # SQLite schema + one-time seed (node:sqlite)
+│   └── seed-data.js        # Initial data used to seed the database
+├── data/esetu.db        # Persistent SQLite database (created on first run)
 └── docs/
     ├── unit_economics.md
     ├── field_research.md
