@@ -1,7 +1,9 @@
 // Minimal service worker — makes the app installable as a PWA.
-// Caches the app shell (HTML/CSS/JS/icons) for fast repeat loads; API calls
-// always go to the network so prices/lots/etc. stay live, never stale.
-const CACHE_NAME = 'ecoscrap-shell-v1';
+// Network-first for the app shell (HTML/CSS/JS): always tries to fetch the
+// latest code first, only falling back to the cached copy if offline. This
+// app is actively updated, so a cache-first strategy would silently trap
+// users on old/broken code with no way to see fixes go live.
+const CACHE_NAME = 'ecoscrap-shell-v2';
 const SHELL_FILES = [
   '/', '/index.html', '/css/style.css',
   '/js/api.js', '/js/i18n.js', '/js/app.js',
@@ -32,12 +34,12 @@ self.addEventListener('fetch', (event) => {
   if (url.pathname.startsWith('/api/')) return;
 
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      return cached || fetch(event.request).then((response) => {
+    fetch(event.request)
+      .then((response) => {
         const clone = response.clone();
         caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
         return response;
-      });
-    })
+      })
+      .catch(() => caches.match(event.request))
   );
 });
