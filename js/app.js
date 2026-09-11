@@ -189,10 +189,10 @@ function renderLoginPage(container) {
         ${selectedRole === 'kabadiwala' ? `
           <div style="display: flex; background: #e2e8f0; border-radius: var(--radius-sm); padding: 4px; margin-bottom: 18px; gap: 6px;">
             <button class="btn-secondary ${kabadiMode === 'login' ? 'btn-primary' : ''}" style="flex:1; padding: 8px; font-size: 13px;" onclick="setKabadiMode('login')">
-              🔑 ${I18N.currentLang === 'en' ? 'Authorized Dealer Sign In' : 'आधीच नोंदणीकृत (Sign In)'}
+              🔑 ${I18N.t('kabadiSignInModeLabel')}
             </button>
             <button class="btn-secondary ${kabadiMode === 'register' ? 'btn-primary' : ''}" style="flex:1; padding: 8px; font-size: 13px;" onclick="setKabadiMode('register')">
-              📝 ${I18N.currentLang === 'en' ? 'New Dealer Registration' : 'नवीन कबाड़ी नोंदणी (Register)'}
+              📝 ${I18N.t('kabadiRegisterModeLabel')}
             </button>
           </div>
         ` : ''}
@@ -221,7 +221,7 @@ function renderLoginPage(container) {
           ${selectedRole === 'kabadiwala' ? (kabadiMode === 'login' ? `
             <div style="background: #f0fdf4; border: 1.5px solid #86efac; border-radius: var(--radius-sm); padding: 14px; margin-bottom: 16px;">
               <div style="margin-bottom:8px;">
-                <strong style="color: #166534; font-size: 13px;">🔒 ${I18N.currentLang === 'en' ? 'Authorized Scrap Dealer Authentication' : 'अधिकृत कबाड़ी पडताळणी'}</strong>
+                <strong style="color: #166534; font-size: 13px;">🔒 ${I18N.t('kabadiAuthCardTitle')}</strong>
               </div>
               <p style="font-size: 12px; color: #166534; margin-bottom: 12px;">
                 ${I18N.currentLang === 'en'
@@ -273,7 +273,7 @@ function renderLoginPage(container) {
             <div style="background: #f0fdf4; border: 1.5px solid #86efac; padding: 12px; border-radius: var(--radius-sm); margin-bottom: 14px; font-size: 13px; color: #166534;">
               <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
                 <input type="checkbox" id="regDigitalScale" checked style="width: 18px; height: 18px;">
-                <strong>${I18N.currentLang === 'en' ? 'I possess a certified digital scale for honest weighing' : 'माझ्याकडे प्रमाणित डिजिटल वजन काटा आहे'}</strong>
+                <strong>${I18N.t('digitalScaleLabel')}</strong>
               </label>
             </div>
           `) : ''}
@@ -426,7 +426,7 @@ function renderLoginPage(container) {
         <div class="modal-content" style="border-top: 6px solid #ea580c; max-width: 440px; text-align: center;">
           <div style="font-size: 44px; margin-bottom: 8px;">🔒</div>
           <h3 style="font-size: 18px; font-weight: 900; color: #9a3412; margin-bottom: 8px;">
-            ${I18N.currentLang === 'en' ? 'Dealer Authentication Failed' : 'कबाड़ी पडताळणी अयशस्वी'}
+            ${I18N.t('dealerAuthFailedTitle')}
           </h3>
           <div style="background: #fff7ed; border: 1.5px solid #fed7aa; padding: 14px; border-radius: var(--radius-sm); font-size: 13px; color: #9a3412; text-align: left; margin: 14px 0;">
             <p><strong>Mobile Number:</strong> <code>${phone}</code></p>
@@ -460,17 +460,17 @@ function renderCustomerPage(container) {
       <button class="btn-secondary ${AppState.customerTab === 'sell' ? 'btn-primary' : ''}" 
               style="flex: 1; padding: 9px 12px; font-size: 13.5px; font-weight: 700;" 
               onclick="setCustomerTab('sell')">
-        🛒 ${I18N.currentLang === 'en' ? 'Sell Scrap & Calculator' : 'स्क्रॅप विका व कॅल्क्युलेटर'}
+        🛒 ${I18N.t('sellTabLabel')}
       </button>
-      <button class="btn-secondary ${AppState.customerTab === 'dealers' ? 'btn-primary' : ''}" 
-              style="flex: 1; padding: 9px 12px; font-size: 13.5px; font-weight: 700;" 
+      <button class="btn-secondary ${AppState.customerTab === 'dealers' ? 'btn-primary' : ''}"
+              style="flex: 1; padding: 9px 12px; font-size: 13.5px; font-weight: 700;"
               onclick="setCustomerTab('dealers')">
-        📍 ${I18N.currentLang === 'en' ? 'Nearby Scrap Dealers & Live ETA' : 'कबाड़ीवाले व थेट स्थान (ETA)'}
+        📍 ${I18N.t('dealersTabLabel')}
       </button>
-      <button class="btn-secondary ${AppState.customerTab === 'profile' ? 'btn-primary' : ''}" 
-              style="flex: 1; padding: 9px 12px; font-size: 13.5px; font-weight: 700;" 
+      <button class="btn-secondary ${AppState.customerTab === 'profile' ? 'btn-primary' : ''}"
+              style="flex: 1; padding: 9px 12px; font-size: 13.5px; font-weight: 700;"
               onclick="setCustomerTab('profile')">
-        👤 ${I18N.currentLang === 'en' ? 'Customer Profile & Sales History' : 'ग्राहक प्रोफाइल व विक्री इतिहास'}
+        👤 ${I18N.t('custProfileTabLabel')}
       </button>
     </div>
   `;
@@ -1159,17 +1159,17 @@ function renderKabadiwalaPage(container) {
       <button class="btn-secondary ${AppState.kabadiwalaTab === 'exchange' ? 'btn-primary' : ''}" 
               style="flex: 1; padding: 10px; font-size: 13.5px; font-weight: 700;" 
               onclick="setKabadiwalaTab('exchange')">
-        📈 ${I18N.currentLang === 'en' ? 'Commodity Exchange' : 'कमोडिटी मार्केट'}
+        📈 ${I18N.t('exchangeTabLabel')}
       </button>
-      <button class="btn-secondary ${AppState.kabadiwalaTab === 'warehouse' ? 'btn-primary' : ''}" 
-              style="flex: 1; padding: 10px; font-size: 13.5px; font-weight: 700;" 
+      <button class="btn-secondary ${AppState.kabadiwalaTab === 'warehouse' ? 'btn-primary' : ''}"
+              style="flex: 1; padding: 10px; font-size: 13.5px; font-weight: 700;"
               onclick="setKabadiwalaTab('warehouse')">
-        🏭 ${I18N.currentLang === 'en' ? 'Warehouse & Recyclers' : 'गोडाउन व रिसायकलर्स'}
+        🏭 ${I18N.t('warehouseTabLabel')}
       </button>
-      <button class="btn-secondary ${AppState.kabadiwalaTab === 'profile' ? 'btn-primary' : ''}" 
-              style="flex: 1; padding: 10px; font-size: 13.5px; font-weight: 700;" 
+      <button class="btn-secondary ${AppState.kabadiwalaTab === 'profile' ? 'btn-primary' : ''}"
+              style="flex: 1; padding: 10px; font-size: 13.5px; font-weight: 700;"
               onclick="setKabadiwalaTab('profile')">
-        👤 ${I18N.currentLang === 'en' ? 'Dealer Profile & Collection History' : 'प्रोफाइल व संकलन तुलना'}
+        👤 ${I18N.t('kabadiProfileTabLabel')}
       </button>
     </div>
   `;
@@ -1212,7 +1212,7 @@ function renderKabadiwalaExchangeTab(container, tabNavHtml) {
           </td>
           <td style="padding: 12px 8px;">
             <strong style="font-size: 16px; color: var(--text-main);">₹${m.recyclerRate}/kg</strong>
-            <div style="font-size: 11px; color: var(--text-muted);">Previous: ₹${m.recyclerRate6hrAgo}</div>
+            <div style="font-size: 11px; color: var(--text-muted);">${I18N.t('previousRateLabel')} ₹${m.recyclerRate6hrAgo}</div>
           </td>
           <td style="padding: 12px 8px;">
             <span class="trend-badge ${cls}">${arrow} ${m.changePct}</span>
@@ -1222,10 +1222,10 @@ function renderKabadiwalaExchangeTab(container, tabNavHtml) {
           <td style="padding: 12px 8px;">
             ${ESETU_DATA.recyclers.length ? `
               <button class="btn-primary" style="padding: 6px 12px; font-size: 12px; width: auto;" onclick="openCreateLotModal('${ESETU_DATA.recyclers[0].id}', '${ESETU_DATA.recyclers[0].name}')">
-                Sell Lot
+                ${I18N.t('sellLotBtn')}
               </button>
             ` : `
-              <span style="font-size: 11px; color: var(--text-muted);">No recyclers registered yet</span>
+              <span style="font-size: 11px; color: var(--text-muted);">${I18N.t('noRecyclersYetShort')}</span>
             `}
           </td>
         </tr>
@@ -1244,12 +1244,12 @@ function renderKabadiwalaExchangeTab(container, tabNavHtml) {
           <table class="stock-ticker-table">
             <thead>
               <tr>
-                <th>Material</th>
-                <th>Recycler Buying Rate</th>
-                <th>Change</th>
-                <th>Day High</th>
-                <th>Day Low</th>
-                <th>Action</th>
+                <th>${I18N.t('materialCol')}</th>
+                <th>${I18N.t('recyclerRateCol')}</th>
+                <th>${I18N.t('changeCol')}</th>
+                <th>${I18N.t('dayHighCol')}</th>
+                <th>${I18N.t('dayLowCol')}</th>
+                <th>${I18N.t('actionCol')}</th>
               </tr>
             </thead>
             <tbody>${rowsHtml}</tbody>
@@ -1266,8 +1266,8 @@ function renderKabadiwalaExchangeTab(container, tabNavHtml) {
     <div style="background:#0f172a; color:#fff; padding:12px 20px; border-radius:var(--radius-sm); margin-bottom:20px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
       <div style="display: flex; align-items: center; gap: 10px;">
         <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#22c55e;"></span>
-        <strong style="color:#38bdf8; font-size:14px; letter-spacing:0.5px;">WHOLESALE COMMODITY RATES</strong>
-        <span style="background: rgba(255,255,255,0.1); font-size: 11.5px; padding: 3px 9px; border-radius: 4px; color: #cbd5e1;">Segregated by material type</span>
+        <strong style="color:#38bdf8; font-size:14px; letter-spacing:0.5px; text-transform: uppercase;">${I18N.t('wholesaleRatesTitle')}</strong>
+        <span style="background: rgba(255,255,255,0.1); font-size: 11.5px; padding: 3px 9px; border-radius: 4px; color: #cbd5e1;">${I18N.t('segregatedByType')}</span>
       </div>
       <button class="audio-btn" style="background:#1e293b; color:#38bdf8; border:1px solid #334155;" onclick="I18N.speak('Wholesale scrap rates by category. Rates update only when a recycler publishes new prices.')">
         ${I18N.t('speakBtn')}
@@ -1340,10 +1340,10 @@ function renderKabadiwalaWarehouseTab(container, tabNavHtml) {
 
           <!-- Deep Facility Address & Operating Details -->
           <div style="background: #f8fafc; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); margin: 10px 0; font-size: 12px; line-height: 1.5;">
-            <div>📍 <strong>Facility:</strong> ${r.fullAddress}</div>
+            <div>📍 <strong>${I18N.t('facilityLabel')}</strong> ${r.fullAddress}</div>
             <div style="display: flex; justify-content: space-between; margin-top: 4px;">
-              <span>📍 Distance: <strong>${r.distanceKm} km</strong></span>
-              <span>📦 Min Batch: <strong>${r.minLotKg} kg</strong></span>
+              <span>📍 ${I18N.t('distanceLabel')} <strong>${r.distanceKm} km</strong></span>
+              <span>📦 ${I18N.t('minBatchLabel')} <strong>${r.minLotKg} kg</strong></span>
             </div>
             <div style="color: #065f46; font-weight: 700; margin-top: 4px;">
               💳 ${r.paymentTerms}
@@ -1353,12 +1353,12 @@ function renderKabadiwalaWarehouseTab(container, tabNavHtml) {
           <!-- Live Recycler Collection Truck ETA & In-Transit Tracking -->
           <div style="background: #eff6ff; border: 1.5px solid #bfdbfe; border-radius: var(--radius-sm); padding: 10px 12px; margin: 10px 0; font-size: 12px;">
             <div style="display: flex; justify-content: space-between; align-items: center;">
-              <span style="color: #1e40af; font-weight: 800;">🚚 Dispatch & Truck ETA</span>
+              <span style="color: #1e40af; font-weight: 800;">🚚 ${I18N.t('dispatchEtaLabel')}</span>
               <span style="background: #dbeafe; color: #1e3a8a; font-weight: 800; padding: 2px 8px; border-radius: 4px;">~${r.collectionTruckETA} mins</span>
             </div>
             <div style="color: #1d4ed8; margin-top: 4px; font-size: 11.5px;">${r.collectionTruckStatus}</div>
-            <div style="color: var(--text-muted); font-size: 11px; margin-top: 4px;">⚖️ <strong>Weighbridge:</strong> ${r.weighbridgeTech}</div>
-            <div style="color: var(--text-muted); font-size: 11px;">⏰ <strong>Gate Hours:</strong> ${r.operatingHours}</div>
+            <div style="color: var(--text-muted); font-size: 11px; margin-top: 4px;">⚖️ <strong>${I18N.t('weighbridgeLabel')}</strong> ${r.weighbridgeTech}</div>
+            <div style="color: var(--text-muted); font-size: 11px;">⏰ <strong>${I18N.t('gateHoursLabel')}</strong> ${r.operatingHours}</div>
           </div>
 
           <!-- Live Recycler Buying Rates (the platform's shared, real-time material rates) -->
@@ -1378,13 +1378,13 @@ function renderKabadiwalaWarehouseTab(container, tabNavHtml) {
           <!-- Action Links: Google Maps & Create Lot -->
           <div style="display: flex; gap: 8px; flex-direction: column; margin-bottom: 10px;">
             <a href="${r.googleMapsUrl}" target="_blank" class="btn-secondary" style="width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-size: 12px; padding: 8px; text-decoration: none; border-color: #3b82f6; color: #1d4ed8; font-weight: 700;">
-              🗺️ Open Facility on Google Maps ↗
+              🗺️ ${I18N.t('openMapsBtn')}
             </a>
             <button class="btn-primary" style="width: 100%; padding: 8px; font-size: 12px;" onclick="openCreateLotModal('${r.id}', '${r.name}')">
               ${I18N.t('createLotBtn')}
             </button>
             <button class="btn-secondary" style="width: 100%; padding: 8px; font-size: 12px;" onclick="openConnectChatModal('${AppState.user.phone}', '${AppState.user.name}', '${r.id}', '${r.name}', 'kabadiwala', '${AppState.user.name}')">
-              💬 Connect via EcoScrap AI App
+              💬 ${I18N.t('connectAppBtn')}
             </button>
           </div>
 
@@ -1444,19 +1444,19 @@ function renderKabadiwalaWarehouseTab(container, tabNavHtml) {
       <div class="card" style="margin-bottom: 0; padding: 18px; display: flex; flex-direction: column; justify-content: space-between;">
         <div class="card-header" style="margin-bottom: 10px; padding-bottom: 8px;">
           <div>
-            <h3 class="card-title" style="font-size: 16px;">📦 Warehouse Stockpile Breakdown</h3>
-            <p class="card-subtitle" style="font-size: 12px;">Current holdings by material grade and wholesale margin</p>
+            <h3 class="card-title" style="font-size: 16px;">📦 ${I18N.t('warehouseBreakdownTitle')}</h3>
+            <p class="card-subtitle" style="font-size: 12px;">${I18N.t('warehouseBreakdownSubtitle')}</p>
           </div>
         </div>
         <div style="overflow-x: auto;">
           <table style="width: 100%; border-collapse: collapse; font-size: 12.5px; text-align: left;">
             <thead>
               <tr style="border-bottom: 2px solid var(--border); color: var(--text-muted);">
-                <th style="padding: 7px 6px;">Material</th>
-                <th style="padding: 7px 6px;">Weight</th>
-                <th style="padding: 7px 6px;">Wholesale</th>
-                <th style="padding: 7px 6px;">Value</th>
-                <th style="padding: 7px 6px;">Gross Margin</th>
+                <th style="padding: 7px 6px;">${I18N.t('materialCol')}</th>
+                <th style="padding: 7px 6px;">${I18N.t('weightCol')}</th>
+                <th style="padding: 7px 6px;">${I18N.t('wholesaleCol')}</th>
+                <th style="padding: 7px 6px;">${I18N.t('valueCol')}</th>
+                <th style="padding: 7px 6px;">${I18N.t('marginCol')}</th>
               </tr>
             </thead>
             <tbody>
@@ -1475,7 +1475,7 @@ function renderKabadiwalaWarehouseTab(container, tabNavHtml) {
           <p class="card-subtitle">Dispatch lots to authorized CPCB green recyclers with verified digital weighbridges & live dispatch tracking</p>
         </div>
         <span class="badge" style="background: #e0f2fe; color: #0369a1; font-weight: 700; padding: 6px 12px; font-size: 12px;">
-          🟢 ${ESETU_DATA.recyclers.length} Recycler${ESETU_DATA.recyclers.length === 1 ? '' : 's'} Connected
+          🟢 ${ESETU_DATA.recyclers.length} ${ESETU_DATA.recyclers.length === 1 ? I18N.t('recyclerSingular') : I18N.t('recyclerPlural')}
         </span>
       </div>
 
@@ -1486,8 +1486,8 @@ function renderKabadiwalaWarehouseTab(container, tabNavHtml) {
       ` : `
         <div style="text-align: center; padding: 40px 20px; color: var(--text-muted);">
           <div style="font-size: 36px; margin-bottom: 8px;">🏭</div>
-          <p style="font-size: 13.5px; font-weight: 700;">No recyclers registered yet</p>
-          <p style="font-size: 12.5px; margin-top: 4px;">Once a recycler registers on this platform, they'll appear here for lot handover.</p>
+          <p style="font-size: 13.5px; font-weight: 700;">${I18N.t('noRecyclersYetShort')}</p>
+          <p style="font-size: 12.5px; margin-top: 4px;">${I18N.t('noRecyclersRegisteredDesc')}</p>
         </div>
       `}
     </div>
@@ -1564,7 +1564,7 @@ function renderKabadiwalaProfileTab(container, tabNavHtml) {
             <div style="display: flex; align-items: center; gap: 10px;">
               <h2 style="font-size: 22px; font-weight: 900; color: var(--text-main);">${dealerName}</h2>
               <span style="background: #dcfce7; color: #166534; font-size: 11.5px; font-weight: 800; padding: 3px 10px; border-radius: var(--radius-full);">
-                ✅ Certified Partner
+                ✅ ${I18N.t('certifiedPartnerBadge')}
               </span>
             </div>
             <div style="font-size: 15px; font-weight: 700; color: var(--primary-dark); margin-top: 2px;">
@@ -1578,14 +1578,14 @@ function renderKabadiwalaProfileTab(container, tabNavHtml) {
 
         <div style="text-align: right;">
           <span style="background: #eff6ff; color: #1e40af; padding: 4px 12px; border-radius: var(--radius-full); font-size: 12.5px; font-weight: 700;">
-            ⚖️ Certified Electronic Scale Verified
+            ⚖️ ${I18N.t('certifiedScaleBadge')}
           </span>
           <div style="margin-top: 8px; display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap;">
             <button class="audio-btn" onclick="I18N.speak('Profile for ${dealerName}, owner of ${yardName}. Total weekly collections: ${totalWeeklyKg} kilograms across ${totalItemsCount} transactions.')">
               ${I18N.t('speakBtn')}
             </button>
             <button class="btn-secondary" style="font-size: 12px; padding: 6px 12px;" onclick="resendPriceListSms('${dealerId}', '${phone}')">
-              📩 Resend Price List SMS
+              📩 ${I18N.t('resendSmsBtn')}
             </button>
           </div>
         </div>
@@ -1595,21 +1595,21 @@ function renderKabadiwalaProfileTab(container, tabNavHtml) {
     <!-- 2. Overview Metrics Cards -->
     <div class="desktop-grid-3">
       <div class="card" style="border-top: 4px solid var(--primary); text-align: center;">
-        <div style="font-size: 12.5px; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Today's Inflow</div>
+        <div style="font-size: 12.5px; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">${I18N.t('todaysInflowLabel')}</div>
         <div style="font-size: 32px; font-weight: 900; color: var(--primary); margin-top: 4px;">185 kg</div>
-        <div style="font-size: 12px; color: var(--success); font-weight: 700; margin-top: 2px;">+30.2% ▲ higher than yesterday</div>
+        <div style="font-size: 12px; color: var(--success); font-weight: 700; margin-top: 2px;">+30.2% ▲ ${I18N.t('higherThanYesterday')}</div>
       </div>
 
       <div class="card" style="border-top: 4px solid #3b82f6; text-align: center;">
-        <div style="font-size: 12.5px; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">7-Day Cumulative Volume</div>
+        <div style="font-size: 12.5px; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">${I18N.t('sevenDayVolumeLabel')}</div>
         <div style="font-size: 32px; font-weight: 900; color: #1e40af; margin-top: 4px;">${totalWeeklyKg} kg</div>
-        <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Processed across ${totalItemsCount} customer pickups</div>
+        <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">${I18N.t('processedAcrossPickups')} (${totalItemsCount})</div>
       </div>
 
       <div class="card" style="border-top: 4px solid var(--accent); text-align: center;">
-        <div style="font-size: 12.5px; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">7-Day Net Realization</div>
+        <div style="font-size: 12.5px; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">${I18N.t('sevenDayRealizationLabel')}</div>
         <div style="font-size: 32px; font-weight: 900; color: var(--accent); margin-top: 4px;">₹${totalWeeklyRev.toLocaleString('en-IN')}</div>
-        <div style="font-size: 12px; color: #166534; font-weight: 700; margin-top: 2px;">Avg gross margin: 28.4%</div>
+        <div style="font-size: 12px; color: #166534; font-weight: 700; margin-top: 2px;">${I18N.t('avgGrossMarginLabel')}: 28.4%</div>
       </div>
     </div>
 
@@ -1617,8 +1617,8 @@ function renderKabadiwalaProfileTab(container, tabNavHtml) {
     <div class="card">
       <div class="card-header">
         <div>
-          <h3 class="card-title">📊 Scrap Collection Comparison with Previous Days</h3>
-          <p class="card-subtitle">Daily tracking of collected weight, lots count, revenue, and day-over-day growth</p>
+          <h3 class="card-title">📊 ${I18N.t('collectionComparisonTitle')}</h3>
+          <p class="card-subtitle">${I18N.t('collectionComparisonSubtitle')}</p>
         </div>
       </div>
 
@@ -1626,15 +1626,15 @@ function renderKabadiwalaProfileTab(container, tabNavHtml) {
         <table style="width: 100%; border-collapse: collapse; font-size: 13.5px; text-align: left;">
           <thead>
             <tr style="border-bottom: 2px solid var(--border); color: var(--text-muted); text-transform: uppercase; font-size: 12px;">
-              <th style="padding: 10px;">Collection Day</th>
-              <th style="padding: 10px;">Scrap Weight (kg)</th>
-              <th style="padding: 10px;">Pickups Count</th>
-              <th style="padding: 10px;">Estimated Revenue</th>
-              <th style="padding: 10px;">Day-over-Day Shift</th>
+              <th style="padding: 10px;">${I18N.t('collectionDayCol')}</th>
+              <th style="padding: 10px;">${I18N.t('scrapWeightCol')}</th>
+              <th style="padding: 10px;">${I18N.t('pickupsCountCol')}</th>
+              <th style="padding: 10px;">${I18N.t('estRevenueCol')}</th>
+              <th style="padding: 10px;">${I18N.t('dayShiftCol')}</th>
             </tr>
           </thead>
           <tbody>
-            ${historyRowsHtml || `<tr><td colspan="5" style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 12.5px;">No collections recorded yet</td></tr>`}
+            ${historyRowsHtml || `<tr><td colspan="5" style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 12.5px;">${I18N.t('noCollectionsYet')}</td></tr>`}
           </tbody>
         </table>
       </div>
@@ -1864,7 +1864,7 @@ function renderRecyclerPage(container) {
               ${AppState.user.name}
             </div>
             <div style="font-size: 12px; color: #2563eb; font-family: monospace;">
-              CPCB Registration ID: ${AppState.user.govRegNo || '—'}
+              ${I18N.t('govRegIdLabel')} ${AppState.user.govRegNo || '—'}
             </div>
           </div>
         </div>
@@ -1882,11 +1882,11 @@ function renderRecyclerPage(container) {
           <div class="card-header">
             <div>
               <h3 class="card-title">${I18N.t('incomingLotsTitle')}</h3>
-              <p class="card-subtitle">Automated weighbridge confirmation & payment settlement</p>
+              <p class="card-subtitle">${I18N.t('incomingLotsSubtitle')}</p>
             </div>
             <div style="display: flex; gap: 8px;">
               <button class="btn-secondary" style="padding: 6px 12px; font-size: 12px;" onclick="refreshRecyclerLots()">
-                🔄 Refresh
+                🔄 ${I18N.t('refreshBtn')}
               </button>
               <button class="audio-btn" onclick="I18N.speak('${I18N.t('incomingLotsTitle')}')">
                 ${I18N.t('speakBtn')}
@@ -1898,8 +1898,8 @@ function renderRecyclerPage(container) {
             ${ESETU_DATA.lots.length ? lotsHtml : `
               <div style="text-align: center; padding: 36px 20px; color: var(--text-muted);">
                 <div style="font-size: 34px; margin-bottom: 8px;">📭</div>
-                <p style="font-size: 13.5px; font-weight: 700;">No incoming lots yet</p>
-                <p style="font-size: 12.5px; margin-top: 4px;">Once a Kabadiwala dispatches a lot to your facility, it'll show up here.</p>
+                <p style="font-size: 13.5px; font-weight: 700;">${I18N.t('noIncomingLotsTitle')}</p>
+                <p style="font-size: 12.5px; margin-top: 4px;">${I18N.t('noIncomingLotsDesc')}</p>
               </div>
             `}
           </div>
@@ -1912,18 +1912,18 @@ function renderRecyclerPage(container) {
           <div class="card-header">
             <div>
               <h3 class="card-title">${I18N.t('updateRatesTitle')}</h3>
-              <p class="card-subtitle">Changes instantly broadcast to certified scrap dealers</p>
+              <p class="card-subtitle">${I18N.t('updateRatesSubtitle')}</p>
             </div>
           </div>
 
           <div style="display: flex; flex-direction: column; gap: 10px;">
             ${ESETU_DATA.materials.map(m => `
               <div style="background: #f8fafc; border: 1px solid var(--border); padding: 12px 16px; border-radius: var(--radius-sm); font-size: 13.5px; display: flex; justify-content: space-between; align-items: center;">
-                <div style="font-weight: 700;">${m.icon} ${m.name} (${m.symbol})</div>
+                <div style="font-weight: 700;">${m.icon} ${getLocalizedMatName(m)} (${m.symbol})</div>
                 <div style="display: flex; align-items: center; gap: 12px;">
                   <span style="color: var(--primary-text); font-weight: 900; font-size: 15px;">₹${m.recyclerRate}/kg</span>
                   <button class="btn-secondary" style="padding: 4px 10px; font-size: 12px;" onclick="promptRateUpdate('${m.id}')">
-                    Edit Rate
+                    ${I18N.t('editRateBtn')}
                   </button>
                 </div>
               </div>
@@ -1932,10 +1932,10 @@ function renderRecyclerPage(container) {
 
           <div style="margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border);">
             <button class="btn-primary" style="width: 100%; padding: 10px; font-size: 13px;" onclick="triggerDailyPriceBroadcast()">
-              📩 Send Today's Price List to All Registered Dealers (SMS)
+              📩 ${I18N.t('broadcastBtn')}
             </button>
             <p style="font-size: 11px; color: var(--text-muted); margin-top: 6px; text-align: center;">
-              Normally fires automatically every morning — this sends it right now for the demo.
+              ${I18N.t('broadcastNote')}
             </p>
           </div>
         </div>
