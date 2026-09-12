@@ -8,12 +8,20 @@ const { createClient } = require('@libsql/client');
 const SEED_DATA = require('./seed-data');
 
 const usingTurso = !!process.env.TURSO_DATABASE_URL;
+console.log('[db] TURSO_DATABASE_URL present:', usingTurso);
 
 // Only touch the local filesystem when actually falling back to a local file —
 // serverless platforms (Vercel) have a read-only filesystem and would crash
 // on this mkdir even though they never use the path (they always set Turso vars).
+// Wrapped defensively too: a failure here should never be fatal on its own.
 const DATA_DIR = path.join(__dirname, '..', 'data');
-if (!usingTurso && !fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+if (!usingTurso) {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  } catch (err) {
+    console.error('[db] Could not create local data dir (non-fatal):', err.message);
+  }
+}
 
 const url = usingTurso ? process.env.TURSO_DATABASE_URL : `file:${path.join(DATA_DIR, 'esetu.db')}`;
 const client = createClient(usingTurso ? { url, authToken: process.env.TURSO_AUTH_TOKEN } : { url });
