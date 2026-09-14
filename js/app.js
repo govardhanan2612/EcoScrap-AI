@@ -16,6 +16,54 @@ function getBrowserCoordinates() {
   });
 }
 
+// Delivery Partner live progress ticker — re-renders the customer Dealers tab every few
+// seconds so the ETA progress bar actually advances, the same interval-based pattern
+// already used for the kabadiwala/recycler chat poll (see connectChatPollInterval).
+let deliveryProgressInterval = null;
+function startDeliveryProgressTicker() {
+  if (deliveryProgressInterval) return;
+  deliveryProgressInterval = setInterval(() => {
+    if (AppState.user && AppState.user.role === 'customer' && AppState.customerTab === 'dealers') {
+      renderCustomerPage(document.getElementById('appContent'));
+    } else {
+      clearInterval(deliveryProgressInterval);
+      deliveryProgressInterval = null;
+    }
+  }, 4000);
+}
+
+// Downscales a captured photo to a small JPEG data URL (~300px) before it's attached to a
+// booking as handover proof — keeps rows small in SQLite/Turso. Resolves to null on any
+// failure (no photo was captured, or the browser couldn't decode it) rather than throwing.
+function downscaleImageToDataUrl(file, maxDim = 300) {
+  return new Promise((resolve) => {
+    if (!file) return resolve(null);
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL('image/jpeg', 0.7));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+    img.src = url;
+  });
+}
+
+// Localized day-of-week names (index 0 = Sunday, matching JS Date/SQL day_of_week convention)
+// — shared by Smart Collection Day displays in both the customer and kabadiwala views.
+function getDayNames() {
+  return [
+    I18N.t('dayNameSun'), I18N.t('dayNameMon'), I18N.t('dayNameTue'), I18N.t('dayNameWed'),
+    I18N.t('dayNameThu'), I18N.t('dayNameFri'), I18N.t('dayNameSat')
+  ];
+}
+
 // Register the service worker so the app can be installed on a home screen.
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
@@ -29,15 +77,53 @@ const AppState = {
   calculatorWeight: 0.2,
   selectedPaymentMode: 'cash',
   capturedImage: null,
+  aiScanResult: null, // { material, confidencePct, grade, gradeLabel, qualityMultiplier } from PriceUtils.classifyImageDeterministic
   activeBookingNotice: null,
+  activeBooking: null, // the real customer_bookings row returned by POST /api/bookings, once requested
+  customerProfileData: null, // { summary, monthlyComparison, history } fetched from GET /api/customers/:phone/summary
+  scaleReading: null, // { weightKg } once a "Connect Smart Scale" simulation settles
+  myCoords: null, // { latitude, longitude } captured after customer login, for distance-based matching
+  isOffline: false, // true when running off the cached snapshot rather than a live bootstrap
+  myInstitution: null, // registered via the customer profile's Community & Institutions section
+  myContract: undefined, // undefined = not yet checked; null = checked, none found
   syncQueue: []
 };
+
+const OFFLINE_SNAPSHOT_KEY = 'esetu_offline_snapshot';
+const SYNC_QUEUE_KEY = 'esetu_sync_queue';
+
+function loadSyncQueue() {
+  try { return JSON.parse(localStorage.getItem(SYNC_QUEUE_KEY) || '[]'); } catch { return []; }
+}
+function saveSyncQueue() {
+  try { localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(AppState.syncQueue)); } catch {}
+}
+
+// Replays any bookings that were queued while offline. Called on load and whenever the
+// browser reports it's back online — a genuinely working (if simple, single-device,
+// no-conflict-resolution) offline-write path, not just a cached read.
+async function flushSyncQueue() {
+  if (!AppState.syncQueue.length || !navigator.onLine) return;
+  const queue = AppState.syncQueue.slice();
+  AppState.syncQueue = [];
+  for (const item of queue) {
+    try {
+      if (item.type === 'booking') await API.createBooking(item.payload);
+    } catch (err) {
+      AppState.syncQueue.push(item); // put it back and try again next time
+    }
+  }
+  saveSyncQueue();
+  if (AppState.user) renderApp();
+}
+window.addEventListener('online', flushSyncQueue);
 
 // Initialize Web App — fetch real data from the backend before first render
 document.addEventListener('DOMContentLoaded', async () => {
   // Always start at Login Dashboard when index.html is opened
   AppState.user = null;
   localStorage.removeItem('esetu_user');
+  AppState.syncQueue = loadSyncQueue();
 
   const loadingEl = document.getElementById('appContent');
   if (loadingEl) loadingEl.innerHTML = '<div style="text-align:center; padding:60px 20px; font-size:15px; color:var(--text-muted);">Loading EcoScrap AI…</div>';
@@ -45,9 +131,21 @@ document.addEventListener('DOMContentLoaded', async () => {
   try {
     const data = await API.bootstrap();
     Object.assign(ESETU_DATA, data);
+    AppState.isOffline = false;
+    try { localStorage.setItem(OFFLINE_SNAPSHOT_KEY, JSON.stringify(data)); } catch {} // best-effort; ignore quota errors
+    flushSyncQueue();
   } catch (err) {
-    if (loadingEl) loadingEl.innerHTML = `<div style="text-align:center; padding:60px 20px; color:var(--danger);">Could not reach the server. Is it running? (${err.message})</div>`;
-    return;
+    // Offline Mode: fall back to the last successfully synced snapshot instead of hard-failing.
+    let snapshot = null;
+    try { snapshot = JSON.parse(localStorage.getItem(OFFLINE_SNAPSHOT_KEY) || 'null'); } catch {}
+
+    if (snapshot) {
+      Object.assign(ESETU_DATA, snapshot);
+      AppState.isOffline = true;
+    } else {
+      if (loadingEl) loadingEl.innerHTML = `<div style="text-align:center; padding:60px 20px; color:var(--danger);">Could not reach the server. Is it running? (${err.message})</div>`;
+      return;
+    }
   }
 
   AppState.selectedMaterial = ESETU_DATA.materials[0];
@@ -78,6 +176,17 @@ function renderApp() {
   const brandTagline = document.getElementById('brandTagline');
   if (brandTagline) brandTagline.textContent = I18N.t('tagline');
 
+  // Footer chrome lives outside #appContent (it's part of index.html, not re-rendered per
+  // tab-switch), so it needs its own explicit language update here.
+  const footerCompliance = document.getElementById('footerComplianceText');
+  if (footerCompliance) footerCompliance.textContent = I18N.t('footerComplianceText');
+  const footerAskBtn = document.getElementById('footerAskBtnLabel');
+  if (footerAskBtn) footerAskBtn.textContent = I18N.t('assistantTitle');
+  const footerHotspotBtn = document.getElementById('footerHotspotBtnLabel');
+  if (footerHotspotBtn) footerHotspotBtn.textContent = I18N.t('hotspotMapBtn');
+  const footerSafetyBtn = document.getElementById('footerSafetyBtnLabel');
+  if (footerSafetyBtn) footerSafetyBtn.textContent = I18N.t('footerSafetyBtnLabel');
+
   // Sync active language button
   document.querySelectorAll('.lang-btn').forEach(b => {
     if (b.dataset.lang === I18N.currentLang) {
@@ -86,6 +195,8 @@ function renderApp() {
       b.classList.remove('active');
     }
   });
+
+  renderOfflineBanner();
 
   if (!AppState.user) {
     if (statusBar) statusBar.style.display = 'none';
@@ -109,6 +220,32 @@ function renderApp() {
     default:
       renderLoginPage(container);
   }
+}
+
+// Offline Mode banner — a persistent DOM node outside #appContent so it survives every
+// tab-switch re-render. Shown whenever the app is running off the cached bootstrap
+// snapshot, or the browser itself reports no connectivity, and whenever writes are
+// waiting in the sync queue for reconnection.
+function renderOfflineBanner() {
+  let el = document.getElementById('offlineBanner');
+  const showOffline = AppState.isOffline || !navigator.onLine;
+  const queuedCount = AppState.syncQueue.length;
+
+  if (!showOffline && !queuedCount) {
+    if (el) el.remove();
+    return;
+  }
+
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'offlineBanner';
+    el.style.cssText = 'position:sticky; top:0; z-index:500; background:#78350f; color:#fef3c7; text-align:center; padding:6px 12px; font-size:12.5px; font-weight:700;';
+    document.body.insertBefore(el, document.body.firstChild);
+  }
+
+  el.textContent = showOffline
+    ? `📴 ${I18N.t('offlineModeBanner')}${queuedCount ? ` — ${queuedCount} ${I18N.t('queuedWritesLabel')}` : ''}`
+    : `⏳ ${queuedCount} ${I18N.t('queuedWritesLabel')}`;
 }
 
 // Update Status Bar
@@ -224,9 +361,7 @@ function renderLoginPage(container) {
                 <strong style="color: #166534; font-size: 13px;">🔒 ${I18N.t('kabadiAuthCardTitle')}</strong>
               </div>
               <p style="font-size: 12px; color: #166534; margin-bottom: 12px;">
-                ${I18N.currentLang === 'en'
-                  ? 'Only verified scrap dealers with a registered mobile number and PIN can access wholesale recycler spot bids.'
-                  : 'फक्त अधिकृत व नोंदणीकृत कबाडी बंधूच घाऊक रिसायकलर दर पाहू शकतात.'}
+                ${I18N.t('kabadiAuthCardBody')}
               </p>
               <div class="desktop-grid-2">
                 <div class="form-group" style="margin-bottom:0;">
@@ -254,15 +389,15 @@ function renderLoginPage(container) {
             <div class="desktop-grid-2">
               <div class="form-group">
                 <label class="form-label">${I18N.t('godownLabel')}</label>
-                <input type="text" id="regGodownName" class="form-input" placeholder="e.g. Mohite Scrap Traders" autocomplete="off">
+                <input type="text" id="regGodownName" class="form-input" placeholder="${I18N.t('godownPlaceholder')}" autocomplete="off">
               </div>
               <div class="form-group">
                 <label class="form-label">${I18N.t('vehicleTypeLabel')}</label>
                 <select id="regVehicleType" class="form-input">
-                  <option value="Bolero Pickup">Mahindra Bolero Pickup (1.5 Ton)</option>
-                  <option value="Tata Ace">Tata Ace / Chhota Hathi</option>
-                  <option value="E-Loader">Eco Electric Loader Rickshaw</option>
-                  <option value="Handcart">Cycle Cart / Handcart</option>
+                  <option value="Bolero Pickup">${I18N.t('vehicleBoleroOpt')}</option>
+                  <option value="Tata Ace">${I18N.t('vehicleTataAceOpt')}</option>
+                  <option value="E-Loader">${I18N.t('vehicleELoaderOpt')}</option>
+                  <option value="Handcart">${I18N.t('vehicleHandcartOpt')}</option>
                 </select>
               </div>
             </div>
@@ -286,18 +421,16 @@ function renderLoginPage(container) {
               </label>
               <input type="text" id="loginGovReg" class="form-input" style="font-weight: 800; color: #1e3a8a; text-transform: uppercase;" placeholder="${I18N.t('govRegPlaceholder')}" autocomplete="off">
               <p class="form-help" style="color: #1d4ed8; margin-top: 6px;">
-                ${I18N.currentLang === 'en'
-                  ? 'First time entering this registration number? It will be registered for you now. Entering it again later signs you back in.'
-                  : I18N.t('govRegHelp')}
+                ${I18N.t('govRegFirstTimeHelp')}
               </p>
               <div class="desktop-grid-2" style="margin-top: 12px;">
                 <div>
-                  <label class="form-label" style="color:#1e40af; font-size:12.5px;">Recycler Facility Name:</label>
-                  <input type="text" id="loginName" class="form-input" placeholder="e.g. Green Earth Recyclers Pvt Ltd" autocomplete="off">
+                  <label class="form-label" style="color:#1e40af; font-size:12.5px;">${I18N.t('recyclerFacilityNameLabel')}</label>
+                  <input type="text" id="loginName" class="form-input" placeholder="${I18N.t('recyclerFacilityNamePlaceholder')}" autocomplete="off">
                 </div>
                 <div>
-                  <label class="form-label" style="color:#1e40af; font-size:12.5px;">Plant Phone Number:</label>
-                  <input type="tel" id="loginPhone" class="form-input" placeholder="10-digit mobile number">
+                  <label class="form-label" style="color:#1e40af; font-size:12.5px;">${I18N.t('plantPhoneLabel')}</label>
+                  <input type="tel" id="loginPhone" class="form-input" placeholder="${I18N.t('phonePlaceholder')}">
                 </div>
               </div>
             </div>
@@ -373,6 +506,12 @@ function renderLoginPage(container) {
           const dealer = await API.kabadiwalaLogin(phone, pin);
           AppState.user = { role: 'kabadiwala', name: dealer.name, phone: dealer.phone, location: dealer.location, yard: dealer.yard, kabadiId: dealer.kabadiId };
           localStorage.setItem('esetu_user', JSON.stringify(AppState.user));
+          // Reuse the coordinates captured at this dealer's original registration (Phase 0)
+          // rather than re-prompting for location permission on every login.
+          const ownRecord = ESETU_DATA.kabadiwalas.find(k => k.phone === dealer.phone);
+          if (ownRecord && typeof ownRecord.latitude === 'number') {
+            AppState.myCoords = { latitude: ownRecord.latitude, longitude: ownRecord.longitude };
+          }
           renderApp();
         } catch (err) {
           showKabadiAuthErrorModal(phone);
@@ -392,14 +531,15 @@ function renderLoginPage(container) {
           Object.assign(ESETU_DATA, fresh);
 
           const smsNote = dealer.sms && dealer.sms.sent
-            ? `\n📩 Today's scrap price list has been sent to ${phone} via SMS.`
-            : `\n⚠️ Price-list SMS not sent (${dealer.sms ? dealer.sms.reason : 'unknown reason'}).`;
-          alert(`🎉 Registration Approved! Welcome ${name}. Assigned ID: ${dealer.kabadiId} (Default PIN: 1234).${smsNote}`);
+            ? `\n${I18N.tf('priceSmsSentNote', { phone })}`
+            : `\n${I18N.tf('priceSmsNotSentNote', { reason: dealer.sms ? dealer.sms.reason : I18N.t('unknownReasonLabel') })}`;
+          alert(`🎉 ${I18N.tf('registrationApprovedMsg', { name, kabadiId: dealer.kabadiId })}${smsNote}`);
           AppState.user = { role: 'kabadiwala', name: dealer.name, phone: dealer.phone, location: dealer.location, yard: dealer.yard, kabadiId: dealer.kabadiId };
           localStorage.setItem('esetu_user', JSON.stringify(AppState.user));
+          if (coords) AppState.myCoords = coords;
           renderApp();
         } catch (err) {
-          alert(`❌ Registration failed: ${err.message}`);
+          alert(`❌ ${I18N.tf('registrationFailedMsg', { error: err.message })}`);
         }
         return;
       }
@@ -414,6 +554,11 @@ function renderLoginPage(container) {
     };
     localStorage.setItem('esetu_user', JSON.stringify(AppState.user));
     renderApp();
+
+    // Real GPS for Smart Recycler Matching / nearest-dealer answers — resolves in the
+    // background; a denied/unavailable permission just means distance-based features
+    // fall back gracefully (see renderKabadiwalaWarehouseTab-equivalent for customers).
+    getBrowserCoordinates().then((coords) => { AppState.myCoords = coords; });
   };
 
   // Rejection Modal for a real registered dealer entering the wrong phone/PIN
@@ -429,13 +574,13 @@ function renderLoginPage(container) {
             ${I18N.t('dealerAuthFailedTitle')}
           </h3>
           <div style="background: #fff7ed; border: 1.5px solid #fed7aa; padding: 14px; border-radius: var(--radius-sm); font-size: 13px; color: #9a3412; text-align: left; margin: 14px 0;">
-            <p><strong>Mobile Number:</strong> <code>${phone}</code></p>
+            <p><strong>${I18N.t('phoneLabel')}</strong> <code>${phone}</code></p>
             <p style="margin-top: 6px;">
               ${I18N.t('kabadiAuthError')}
             </p>
           </div>
           <button class="btn-secondary" onclick="document.getElementById('loginErrorModalContainer').innerHTML=''">
-            Close
+            ${I18N.t('closeBtnLabel')}
           </button>
         </div>
       </div>
@@ -451,6 +596,7 @@ function renderLoginPage(container) {
 // Sub-Page 3: Customer Profile, Sales History & Scrap Dealer Comparison
 // -------------------------------------------------------------
 function renderCustomerPage(container) {
+  renderOfflineBanner();
   if (!AppState.customerTab) AppState.customerTab = 'sell';
   if (!AppState.trackedKabadiwala) AppState.trackedKabadiwala = ESETU_DATA.kabadiwalas[0] || null;
 
@@ -489,7 +635,40 @@ window.setCustomerTab = (tabName) => {
   const container = document.getElementById('appContent');
   renderCustomerPage(container);
   window.scrollTo({ top: 0, behavior: 'smooth' });
+  if (tabName === 'profile' && !AppState.customerProfileData) {
+    refreshCustomerProfileData();
+  }
+  if (tabName === 'dealers' && AppState.nextCollectionDay === undefined) {
+    loadNextCollectionDay();
+  }
 };
+
+// Smart Collection Day (customer side) — looks up whether any dealer has set a recurring
+// collection day for this customer's pincode.
+async function loadNextCollectionDay() {
+  AppState.nextCollectionDay = null; // mark "checked" so we don't refetch every render
+  const pincodeMatch = (AppState.user.location || '').match(/\d{6}/);
+  if (!pincodeMatch) return;
+  try {
+    const schedules = await API.listCollectionSchedules({ pincode: pincodeMatch[0] });
+    if (schedules.length) {
+      AppState.nextCollectionDay = schedules[0];
+      renderCustomerPage(document.getElementById('appContent'));
+    }
+  } catch {}
+}
+
+async function refreshCustomerProfileData() {
+  try {
+    const data = await API.getCustomerSummary(AppState.user.phone);
+    AppState.customerProfileData = data;
+  } catch (err) {
+    AppState.customerProfileData = { summary: ESETU_DATA.customerSalesSummary, monthlyComparison: [], history: [], error: err.message };
+  }
+  if (AppState.customerTab === 'profile') {
+    renderCustomerPage(document.getElementById('appContent'));
+  }
+}
 
 // -------------------------------------------------------------
 // SUB-PAGE 1: SELL SCRAP & COMPACT CALCULATOR
@@ -498,7 +677,9 @@ function renderCustomerSellTab(container, tabNavHtml) {
   const currentMat = AppState.selectedMaterial;
   const weightKg = Number(AppState.calculatorWeight) || 0.2;
   const weightGrams = Math.round(weightKg * 1000);
-  const currentPayout = (weightKg * currentMat.customerRate).toFixed(0);
+  const scan = AppState.aiScanResult;
+  const qualityMultiplier = (scan && scan.material.id === currentMat.id) ? scan.qualityMultiplier : 1.0;
+  const currentPayout = (weightKg * currentMat.customerRate * qualityMultiplier).toFixed(0);
   const weightDisplayHtml = weightKg < 1 
     ? `<strong style="color: var(--primary); font-size: 26px;">${weightGrams}g</strong> <span style="font-size:13.5px; color:var(--text-muted); font-weight:700;">(${weightKg.toFixed(2)} kg)</span>`
     : `<strong style="color: var(--primary); font-size: 26px;">${weightKg} kg</strong> <span style="font-size:13.5px; color:var(--text-muted); font-weight:700;">(${weightGrams}g)</span>`;
@@ -552,7 +733,7 @@ function renderCustomerSellTab(container, tabNavHtml) {
       <div style="background: #ecfdf5; border: 1.5px solid #10b981; padding: 10px 14px; border-radius: var(--radius-sm); margin-bottom: 14px; font-size: 13px; color: #065f46; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
         <div>${AppState.activeBookingNotice}</div>
         <button class="btn-primary" style="padding: 6px 12px; font-size: 12px; width: auto;" onclick="setCustomerTab('dealers')">
-          🛵 View Live ETA & Map ➔
+          🛵 ${I18N.t('viewLiveEtaBtn')}
         </button>
       </div>
     ` : ''}
@@ -568,7 +749,7 @@ function renderCustomerSellTab(container, tabNavHtml) {
               ${I18N.t('compareBoxTitle')}
             </div>
             <span style="font-size: 11px; background: #ecfdf5; color: #047857; padding: 2px 7px; border-radius: 4px; font-weight: 800;">
-              ● Live Doorstep Rates
+              ● ${I18N.t('liveDoorstepRatesBadge')}
             </span>
           </div>
           <div class="comparison-grid">
@@ -597,23 +778,12 @@ function renderCustomerSellTab(container, tabNavHtml) {
               ${I18N.t('takePhotoBtn')}
             </div>
             <p style="font-size: 11.5px; color: var(--text-muted); margin-top: 2px;">
-              Click to capture circuit board, copper wiring, dead laptop, or battery
+              ${I18N.t('captureHint')}
             </p>
             <input type="file" id="cameraInput" accept="image/*" style="display:none;" onchange="handleImageSelected(event)">
           </div>
 
-          <div id="aiDetectionCard" style="display: none; background: #f0fdf4; border: 1.5px solid #86efac; border-radius: var(--radius-sm); padding: 12px; margin-top: 10px;">
-            <div style="display: flex; align-items: center; justify-content: space-between;">
-              <span style="font-size: 12.5px; font-weight: 800; color: #166534;">🤖 ${I18N.t('detectResult')}</span>
-              <span style="font-size: 11px; background: #166534; color: #fff; padding: 2px 6px; border-radius: 4px; font-weight: 700;">98.4% Match</span>
-            </div>
-            <div style="font-size: 14px; font-weight: 800; color: #064e3b; margin-top: 4px;" id="aiDetectedName">
-              High-Grade Server Circuit Board (Telecom & Gold-plated)
-            </div>
-            <div style="font-size: 12.5px; color: #15803d; margin-top: 2px;" id="aiDetectedRate">
-              💰 Guaranteed Buyback Rate: <strong>₹950 / kg</strong>
-            </div>
-          </div>
+          ${AppState.aiScanResult ? renderAiDetectionCard(AppState.aiScanResult) : ''}
         </div>
       </div>
 
@@ -623,7 +793,7 @@ function renderCustomerSellTab(container, tabNavHtml) {
           <div class="card-header" style="margin-bottom: 6px;">
             <div>
               <h4 class="card-title" style="color: var(--primary-dark); font-size: 15px;">${I18N.t('calcBoxTitle')}</h4>
-              <p class="card-subtitle" style="font-size: 11.5px;">Choose scrap type & adjust weight</p>
+              <p class="card-subtitle" style="font-size: 11.5px;">${I18N.t('chooseScrapTypeSubtitle')}</p>
             </div>
             <button class="audio-btn" style="font-size: 11px; padding: 3px 8px;" onclick="speakCurrentValuation()">
               ${I18N.t('speakBtn')}
@@ -635,21 +805,39 @@ function renderCustomerSellTab(container, tabNavHtml) {
             ${matChipsHtml}
           </div>
 
+          <!-- Voice Selling: speak the material and weight instead of tapping -->
+          <button id="voiceSellBtn" class="btn-secondary" style="width: 100%; padding: 7px; font-size: 12px; font-weight: 700; border-color: #a855f7; color: #7e22ce; margin-bottom: 6px;" onclick="startVoiceSelling()">
+            🎙️ ${I18N.t('voiceSellBtn')}
+          </button>
+          <div id="voiceSellStatus" style="font-size: 11px; color: var(--text-muted); text-align: center; margin-bottom: 6px; min-height: 14px;"></div>
+
           <!-- Stepper Controls (Supporting 100g+ micro-weights) -->
           <div style="text-align: center; margin-top: 6px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; flex-wrap: wrap; gap: 6px;">
               <span style="font-size: 12.5px; font-weight: 700; color: var(--primary-dark);">${I18N.t('weightLabel')}</span>
               <span style="font-size: 11px; background: #ecfdf5; color: #065f46; font-weight: 800; padding: 2px 8px; border-radius: 4px;">
-                ⚡ Micro-weights accepted: from 100g+
+                ⚡ ${I18N.t('microWeightsAcceptedBadge')}
               </span>
             </div>
 
+            <div id="smartScaleWidget" style="margin-bottom: 8px;">
+              ${AppState.scaleReading ? `
+                <div style="text-align:center; font-size:12px; font-weight:700; color:#166534; padding:7px; background:#f0fdf4; border:1px solid #86efac; border-radius:6px;">
+                  ⚖️ ${I18N.t('scaleSyncedLabel')} ${Math.round(AppState.scaleReading.weightKg * 1000)}g
+                </div>
+              ` : `
+                <button class="btn-secondary" style="width: 100%; padding: 7px; font-size: 12px; font-weight: 700; border-color: #3b82f6; color: #1d4ed8;" onclick="connectSmartScale()">
+                  ⚖️ ${I18N.t('connectScaleBtn')}
+                </button>
+              `}
+            </div>
+
             <div class="stepper-control" style="margin: 6px auto; display: flex; align-items: center; justify-content: center; gap: 8px;">
-              <button class="step-btn" style="font-size: 12.5px; font-weight: 800; min-width: 62px; height: 38px;" onclick="adjustWeight(-0.1)" title="Minus 100 grams">-100g</button>
+              <button class="step-btn" style="font-size: 12.5px; font-weight: 800; min-width: 62px; height: 38px;" onclick="adjustWeight(-0.1)" title="${I18N.t('minus100gTitle')}">-100g</button>
               <div class="weight-display" style="min-width: 175px;">
                 ${weightDisplayHtml}
               </div>
-              <button class="step-btn" style="font-size: 12.5px; font-weight: 800; min-width: 62px; height: 38px;" onclick="adjustWeight(0.1)" title="Plus 100 grams">+100g</button>
+              <button class="step-btn" style="font-size: 12.5px; font-weight: 800; min-width: 62px; height: 38px;" onclick="adjustWeight(0.1)" title="${I18N.t('plus100gTitle')}">+100g</button>
             </div>
 
             <!-- Quick Presets in Grams & KG -->
@@ -668,7 +856,7 @@ function renderCustomerSellTab(container, tabNavHtml) {
             <div style="font-size: 12px; font-weight: 700; color: var(--text-muted);">${I18N.t('exactPayoutLabel')}</div>
             <div class="payout-amount" style="font-size: 32px; font-weight: 900; color: var(--primary);">₹${Number(currentPayout).toLocaleString('en-IN')}</div>
             <div style="font-size: 11.5px; color: var(--primary-dark); margin-top: 2px;">
-              (${weightGrams} grams / ${weightKg} kg × ₹${currentMat.customerRate}/${currentMat.unit})
+              (${weightGrams} grams / ${weightKg} kg × ₹${currentMat.customerRate}/${currentMat.unit}${qualityMultiplier !== 1.0 ? ` × ${qualityMultiplier}x ${I18N.t('qualityGradeLabel')} ${scan.grade}` : ''})
             </div>
           </div>
 
@@ -693,7 +881,7 @@ function renderCustomerSellTab(container, tabNavHtml) {
 
           <!-- Direct Request & Live ETA Trigger -->
           <button class="btn-primary" style="padding: 12px; font-size: 14.5px; font-weight: 800; width: 100%; margin-top: 14px;" onclick="bookPickupFromCalculator()">
-            🛵 Request Doorstep Pickup & Track Live ETA ➔
+            🛵 ${I18N.t('requestPickupBtn')}
           </button>
         </div>
       </div>
@@ -711,8 +899,8 @@ function renderCustomerDealersTab(container, tabNavHtml) {
       ${tabNavHtml}
       <div class="card" style="text-align: center; padding: 48px 24px;">
         <div style="font-size: 40px; margin-bottom: 10px;">📍</div>
-        <h3 style="font-size: 16px; font-weight: 800; margin-bottom: 6px;">No scrap dealers registered yet in your area</h3>
-        <p style="font-size: 13px; color: var(--text-muted);">Once a Kabadiwala registers on this platform, they'll appear here with live tracking and contact details.</p>
+        <h3 style="font-size: 16px; font-weight: 800; margin-bottom: 6px;">${I18N.t('noDealersInAreaTitle')}</h3>
+        <p style="font-size: 13px; color: var(--text-muted);">${I18N.t('noDealersInAreaDesc')}</p>
       </div>
     `;
     return;
@@ -720,6 +908,17 @@ function renderCustomerDealersTab(container, tabNavHtml) {
 
   const tracked = AppState.trackedKabadiwala || ESETU_DATA.kabadiwalas[0];
   const payout = (AppState.calculatorWeight * AppState.selectedMaterial.customerRate).toFixed(0);
+
+  // Delivery Partner live progress — a real elapsed-time calculation against the tracked
+  // ETA (ticking every few seconds via the interval started below), replacing what used to
+  // be a permanently-frozen 68% bar. Still a simulation (no real vehicle GPS feed exists),
+  // but now an honestly-behaving one: it actually advances over the wait.
+  if (!AppState.deliveryStartedAt) AppState.deliveryStartedAt = Date.now();
+  const elapsedMinutes = (Date.now() - AppState.deliveryStartedAt) / 60000;
+  const etaMinutes = Math.max(1, tracked.etaMinutes || 20);
+  const progressPct = Math.min(97, Math.round(10 + (elapsedMinutes / etaMinutes) * 87));
+  const stageLabel = progressPct >= 90 ? I18N.t('stageArriving') : (progressPct >= 30 ? I18N.t('stageEnRoute') : I18N.t('stageConfirmed'));
+  startDeliveryProgressTicker();
 
   const kabadiwalasHtml = ESETU_DATA.kabadiwalas.map(k => {
     const isCurrentlyTracked = k.id === tracked.id;
@@ -768,30 +967,30 @@ function renderCustomerDealersTab(container, tabNavHtml) {
 
         <!-- Deep Scrap Dealer Info & Certified Scales -->
         <div style="background: #f8fafc; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; margin: 10px 0; font-size: 12px; line-height: 1.5;">
-          <div>📍 <strong>Address:</strong> ${k.fullAddress}</div>
-          <div style="margin-top: 3px;">⚖️ <strong>Weighing Equipment:</strong> ${k.weighingEquipment}</div>
-          <div style="margin-top: 3px;">⏰ <strong>Hours:</strong> ${k.operatingHours} • 📜 <strong>License:</strong> <code>${k.licenseNo}</code></div>
-          <div style="margin-top: 3px; color: var(--text-muted);">📦 <strong>Accepts:</strong> ${k.materialsAccepted}</div>
+          <div>📍 <strong>${I18N.t('addressLabel')}</strong> ${k.fullAddress}</div>
+          <div style="margin-top: 3px;">⚖️ <strong>${I18N.t('weighingEquipmentLabel')}</strong> ${k.weighingEquipment}</div>
+          <div style="margin-top: 3px;">⏰ <strong>${I18N.t('hoursLabel')}</strong> ${k.operatingHours} • 📜 <strong>${I18N.t('licenseLabel')}</strong> <code>${k.licenseNo}</code></div>
+          <div style="margin-top: 3px; color: var(--text-muted);">📦 <strong>${I18N.t('acceptsLabel')}</strong> ${k.materialsAccepted}</div>
         </div>
 
         <!-- Action Links: Google Maps & Booking -->
         <div style="display: flex; gap: 8px; flex-wrap: wrap;">
           <!-- Location Link Opening Google Maps in New Tab -->
           <a href="${k.googleMapsUrl}" target="_blank" class="btn-secondary" style="flex: 1; min-width: 170px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-size: 12px; padding: 8px; text-decoration: none; border-color: #3b82f6; color: #1d4ed8; font-weight: 700;">
-            🗺️ Open Google Maps Location ↗
+            🗺️ ${I18N.t('openMapsLocationBtn')}
           </a>
           <a href="tel:${k.phone}" class="btn-secondary" style="padding: 8px 14px; font-size: 12px; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;">
-            📞 Call Dealer
+            📞 ${I18N.t('callDealerBtn')}
           </a>
           <button class="btn-primary" style="flex: 1.2; min-width: 160px; padding: 8px; font-size: 12.5px;" onclick="bookPickupFromKabadiwala('${k.name}')">
-            ${isCurrentlyTracked ? '✅ Currently En Route' : '🛵 Book This Dealer'}
+            ${isCurrentlyTracked ? '✅ ' + I18N.t('currentlyEnRouteBtn') : '🛵 ' + I18N.t('bookThisDealerBtn')}
           </button>
         </div>
 
         <!-- Customer Reviews -->
         <div class="reviews-accordion" style="margin-top: 10px;">
           <div style="font-weight: 700; font-size: 12px; color: var(--text-muted); display: flex; justify-content: space-between;">
-            <span>⭐ Customer Feedback (${k.reviews.length})</span>
+            <span>⭐ ${I18N.t('customerFeedbackLabel')} (${k.reviews.length})</span>
             <span style="color: var(--primary);">▼</span>
           </div>
           <div style="margin-top: 4px;">
@@ -802,8 +1001,16 @@ function renderCustomerDealersTab(container, tabNavHtml) {
     `;
   }).join('');
 
+  const dayNames = getDayNames();
+  const collectionDayBanner = AppState.nextCollectionDay ? `
+    <div style="background: #eff6ff; border: 1.5px solid #93c5fd; padding: 10px 14px; border-radius: var(--radius-sm); margin-bottom: 14px; font-size: 12.5px; color: #1e40af; font-weight: 700;">
+      📅 ${I18N.t('nextCollectionDayLabel')} ${I18N.t('everyWeekdayPrefix')} ${dayNames[AppState.nextCollectionDay.dayOfWeek]} (${AppState.nextCollectionDay.kabadiwalaName})
+    </div>
+  ` : '';
+
   container.innerHTML = `
     ${tabNavHtml}
+    ${collectionDayBanner}
 
     <!-- 1. Active Order Live Tracking & Estimated Time of Arrival (ETA) -->
     <div class="card" style="border-top: 4px solid var(--primary); background: #ffffff; padding: 18px; margin-bottom: 16px; box-shadow: var(--shadow-md);">
@@ -812,25 +1019,25 @@ function renderCustomerDealersTab(container, tabNavHtml) {
           <div style="display: flex; align-items: center; gap: 8px;">
             <span class="live-dot-pulse"></span>
             <strong style="color: var(--primary); font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.5px;">
-              Live Doorstep Pickup Tracking & ETA
+              ${I18N.t('liveTrackingTitle')}
             </strong>
           </div>
           <h3 style="font-size: 19px; font-weight: 900; margin-top: 4px; color: var(--text-main);">
             🛵 ${tracked.name} (${tracked.shopName})
           </h3>
           <div style="font-size: 12.5px; color: var(--text-muted); margin-top: 2px;">
-            Vehicle: <strong>${tracked.vehicle}</strong> (Plate: <code>${tracked.vehiclePlate}</code>)
+            ${I18N.t('vehicleLabel')} <strong>${tracked.vehicle}</strong> (${I18N.t('plateLabel')} <code>${tracked.vehiclePlate}</code>)
           </div>
         </div>
 
         <!-- Dynamic Live ETA Badge -->
         <div style="text-align: right;">
           <div style="background: #ecfdf5; border: 1.5px solid #86efac; padding: 8px 14px; border-radius: var(--radius-sm); text-align: center;">
-            <div style="font-size: 11px; font-weight: 800; color: #166534; text-transform: uppercase;">Estimated Time of Arrival</div>
+            <div style="font-size: 11px; font-weight: 800; color: #166534; text-transform: uppercase;">${I18N.t('etaLabelLong')}</div>
             <div style="font-size: 24px; font-weight: 900; color: #166534; margin-top: 2px;">
-              ~${tracked.etaMinutes} mins
+              ~${tracked.etaMinutes} ${I18N.t('minsUnit')}
             </div>
-            <div style="font-size: 11px; color: #15803d; font-weight: 600;">Distance: ${tracked.etaDistanceKm} km away</div>
+            <div style="font-size: 11px; color: #15803d; font-weight: 600;">${I18N.t('distanceAwayLabel')} ${tracked.etaDistanceKm} km</div>
           </div>
         </div>
       </div>
@@ -838,39 +1045,44 @@ function renderCustomerDealersTab(container, tabNavHtml) {
       <!-- Live 3-Stage Progress Timeline -->
       <div style="margin: 16px 0 12px 0;">
         <div style="display: flex; justify-content: space-between; font-size: 12px; font-weight: 700; margin-bottom: 6px;">
-          <span style="color: #166534;">1. Pickup Confirmed ✓</span>
-          <span style="color: var(--primary);">2. Dealer En Route (with Scale) 🛵</span>
-          <span style="color: var(--text-muted);">3. Doorstep Handover & Cash 💵</span>
+          <span style="color: #166534;">1. ${I18N.t('stageConfirmed')} ✓</span>
+          <span style="color: var(--primary);">2. ${I18N.t('stageEnRouteWithScale')} 🛵</span>
+          <span style="color: var(--text-muted);">3. ${I18N.t('stageHandoverCash')} 💵</span>
         </div>
         <div style="background: #e2e8f0; height: 8px; border-radius: 4px; position: relative; overflow: hidden;">
-          <div style="background: linear-gradient(90deg, #16a34a, #047857); width: 68%; height: 8px; border-radius: 4px; animation: pulseHighlight 2s infinite;"></div>
+          <div style="background: linear-gradient(90deg, #16a34a, #047857); width: ${progressPct}%; height: 8px; border-radius: 4px; transition: width 1s linear;"></div>
         </div>
         <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); margin-top: 6px;">
-          <span>Scale: ${tracked.weighingEquipment.split('(')[0]}</span>
-          <span>Status: <strong>${tracked.transitState}</strong></span>
-          <span>Expected Cash: <strong>₹${Number(payout).toLocaleString('en-IN')}</strong></span>
+          <span>${I18N.t('scaleLabel')} ${tracked.weighingEquipment.split('(')[0]}</span>
+          <span>${I18N.t('statusLabel')} <strong>${stageLabel}</strong> (${progressPct}%)</span>
+          <span>${I18N.t('expectedCashLabel')} <strong>₹${Number(payout).toLocaleString('en-IN')}</strong></span>
         </div>
       </div>
 
       <!-- Quick Action Buttons for En-Route Dealer -->
       <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border);">
         <a href="${tracked.googleMapsUrl}" target="_blank" class="btn-primary" style="flex: 1.4; min-width: 200px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; text-decoration: none; font-size: 13.5px; padding: 10px;">
-          🗺️ View Live Route on Google Maps ↗
+          🗺️ ${I18N.t('viewLiveRouteBtn')}
         </a>
         <a href="tel:${tracked.phone}" class="btn-secondary" style="flex: 1; min-width: 150px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; text-decoration: none; font-size: 13px; padding: 10px;">
-          📞 Call ${tracked.name}
+          📞 ${I18N.t('callLabel')} ${tracked.name}
         </a>
-        <button class="audio-btn" style="padding: 10px 14px;" onclick="I18N.speak('Estimated arrival time for ${tracked.name} is ${tracked.etaMinutes} minutes. Bringing certified digital scale for doorstep cash payout.')">
+        <button class="audio-btn" style="padding: 10px 14px;" onclick="I18N.speak(I18N.tf('etaSpeechTemplate', { name: '${tracked.name.replace(/'/g, "\\'")}', mins: '${tracked.etaMinutes}' }))">
           ${I18N.t('speakBtn')}
         </button>
+        ${AppState.activeBooking ? `
+          <button class="btn-primary" style="flex: 1.4; min-width: 220px; padding: 10px; font-size: 13.5px; background: linear-gradient(90deg, #16a34a, #047857);" onclick="markBookingCollected()">
+            ✅ ${I18N.t('markCollectedBtn')} (${AppState.activeBooking.bookingCode})
+          </button>
+        ` : ''}
       </div>
     </div>
 
     <!-- 2. Section Header: Nearby Scrap Dealers -->
     <div class="card-header" style="margin: 18px 0 10px 0;">
       <div>
-        <h3 class="card-title" style="font-size: 16px;">📍 Verified Scrap Aggregators with Certified Scales Near You</h3>
-        <p class="card-subtitle" style="font-size: 12px;">Click any Google Maps link to view exact shop location, or book directly for doorstep pickup</p>
+        <h3 class="card-title" style="font-size: 16px;">📍 ${I18N.t('nearbyAggregatorsTitle')}</h3>
+        <p class="card-subtitle" style="font-size: 12px;">${I18N.t('nearbyAggregatorsSubtitle')}</p>
       </div>
     </div>
 
@@ -888,14 +1100,34 @@ function renderCustomerProfileTab(container, tabNavHtml) {
   const custName = AppState.user.name || 'Customer';
   const custPhone = AppState.user.phone || '—';
   const custLocation = AppState.user.location || '—';
-  const summary = ESETU_DATA.customerSalesSummary;
 
-  // Comparison Rows with previous months
-  const monthlyRowsHtml = ESETU_DATA.customerMonthlyComparison.map(m => `
+  if (!AppState.customerProfileData) {
+    container.innerHTML = `
+      ${tabNavHtml}
+      <div class="card" style="text-align: center; padding: 48px 24px; color: var(--text-muted);">
+        <div style="font-size: 32px;">⏳</div>
+        <p style="font-size: 13.5px; font-weight: 700; margin-top: 8px;">${I18N.t('loadingTransactionHistory')}</p>
+      </div>
+    `;
+    refreshCustomerProfileData();
+    return;
+  }
+
+  const profileData = AppState.customerProfileData;
+  const summary = profileData.summary;
+
+  // Comparison Rows with previous months (real, computed from completed bookings)
+  const monthlyRowsHtml = profileData.monthlyComparison.map((m, idx) => {
+    const prior = profileData.monthlyComparison[idx + 1];
+    const changeVsPrior = prior && prior.earnings
+      ? `${m.earnings >= prior.earnings ? '+' : ''}${Math.round(((m.earnings - prior.earnings) / prior.earnings) * 100)}%`
+      : '—';
+    return { period: m.period, weightKg: m.weightKg, pickups: m.pickups, earnings: m.earnings, changeVsPrior };
+  }).map(m => `
     <tr style="border-bottom: 1px solid var(--border);">
       <td style="padding: 10px 8px; font-weight: 700;">${m.period}</td>
       <td style="padding: 10px 8px; color: var(--primary-dark); font-weight: 800;">${m.weightKg} kg</td>
-      <td style="padding: 10px 8px;">${m.pickups} pickups</td>
+      <td style="padding: 10px 8px;">${m.pickups} ${I18N.t('pickupsUnit')}</td>
       <td style="padding: 10px 8px; font-weight: 800;">₹${m.earnings.toLocaleString('en-IN')}</td>
       <td style="padding: 10px 8px;">
         <span style="background: #ecfdf5; color: #166534; font-weight: 800; font-size: 11.5px; padding: 2px 7px; border-radius: var(--radius-full);">
@@ -905,32 +1137,31 @@ function renderCustomerProfileTab(container, tabNavHtml) {
     </tr>
   `).join('');
 
-  // Itemized Sales History Rows
-  const historyRowsHtml = ESETU_DATA.customerSalesHistory.map(tx => `
+  // Itemized Sales History Rows — real completed customer_bookings rows.
+  const historyRowsHtml = profileData.history.map(tx => `
     <tr style="border-bottom: 1px solid var(--border); font-size: 12.5px;">
       <td style="padding: 10px 8px;">
-        <strong>${tx.date}</strong>
-        <div style="font-size: 11px; color: var(--text-muted);">${tx.time} • <code>${tx.txId}</code></div>
+        <strong>${new Date(tx.completedAt).toLocaleDateString()}</strong>
+        <div style="font-size: 11px; color: var(--text-muted);">${new Date(tx.completedAt).toLocaleTimeString()} • <code>${tx.bookingCode}</code></div>
       </td>
       <td style="padding: 10px 8px;">
-        <strong>${tx.dealerName}</strong>
-        <div style="font-size: 11px; color: var(--primary-dark); font-weight: 700;">🏪 ${tx.shopName}</div>
+        <strong>${tx.kabadiwalaName}</strong>
       </td>
       <td style="padding: 10px 8px;">
-        ${tx.scrapItems}
+        ${tx.materialName}${tx.qualityGrade ? ` <span style="font-size:10.5px; color:var(--text-muted);">(${I18N.t('qualityGradeLabel')} ${tx.qualityGrade})</span>` : ''}
       </td>
       <td style="padding: 10px 8px; font-weight: 800;">
         ${tx.weightKg} kg
         <div style="font-size: 11px; color: var(--text-muted); font-weight: normal;">@ ₹${tx.ratePerKg}/kg</div>
       </td>
       <td style="padding: 10px 8px; font-weight: 900; color: #065f46;">
-        ₹${tx.totalPaid.toLocaleString('en-IN')}
+        ₹${Number(tx.totalAmount).toLocaleString('en-IN')}
         <div style="font-size: 10.5px; color: var(--text-muted); font-weight: 600;">${tx.paymentMode}</div>
       </td>
       <td style="padding: 10px 8px;">
-        <span style="background: #dcfce7; color: #166534; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 700;">
-          🌱 ${tx.certId}
-        </span>
+        <button class="btn-secondary" style="padding: 3px 9px; font-size: 11px; font-weight: 700;" onclick="viewDigitalPassport(${tx.id})">
+          🌱 ${I18N.t('viewPassportBtn')}
+        </button>
       </td>
     </tr>
   `).join('');
@@ -949,11 +1180,11 @@ function renderCustomerProfileTab(container, tabNavHtml) {
             <div style="display: flex; align-items: center; gap: 8px;">
               <h3 style="font-size: 19px; font-weight: 900; color: var(--text-main); margin: 0;">${custName}</h3>
               <span style="background: #dcfce7; color: #166534; font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: var(--radius-full);">
-                🌿 Certified Eco-Citizen
+                🌿 ${I18N.t('certifiedEcoCitizenBadge')}
               </span>
             </div>
             <div style="font-size: 13.5px; font-weight: 700; color: var(--primary-dark); margin-top: 2px;">
-              ${summary.preferredScrapDealer ? `Preferred Scrap Dealer: <strong>${summary.preferredScrapDealer}</strong>` : 'No transactions yet'}
+              ${summary.preferredScrapDealer ? `${I18N.t('preferredDealerLabel')} <strong>${summary.preferredScrapDealer}</strong>` : I18N.t('noTransactionsYet')}
             </div>
             <div style="font-size: 12px; color: var(--text-muted); margin-top: 3px;">
               📍 ${custLocation} • 📞 ${custPhone}
@@ -963,10 +1194,10 @@ function renderCustomerProfileTab(container, tabNavHtml) {
 
         <div style="text-align: right;">
           <span style="background: #eff6ff; color: #1e40af; padding: 3px 10px; border-radius: var(--radius-full); font-size: 11.5px; font-weight: 700;">
-            🛡️ Zero-Landfill Verified
+            🛡️ ${I18N.t('zeroLandfillVerifiedBadge')}
           </span>
           <div style="margin-top: 6px;">
-            <button class="audio-btn" style="font-size: 11.5px; padding: 4px 10px;" onclick="I18N.speak('Customer profile for ${custName}. Total scrap sold to dealers: ${summary.totalWeightSoldKg} kilograms. Total cash earned: ${summary.totalCashReceived} rupees.')">
+            <button class="audio-btn" style="font-size: 11.5px; padding: 4px 10px;" onclick="I18N.speak(I18N.tf('customerProfileSpeechTemplate', { name: '${custName.replace(/'/g, "\\'")}', weight: '${summary.totalWeightSoldKg}', cash: '${summary.totalCashReceived}' }))">
               ${I18N.t('speakBtn')}
             </button>
           </div>
@@ -977,21 +1208,21 @@ function renderCustomerProfileTab(container, tabNavHtml) {
     <!-- 2. Overview Impact Metrics (3-Column Grid) -->
     <div class="desktop-grid-3" style="gap: 12px; margin-bottom: 14px;">
       <div class="card" style="border-top: 4px solid var(--primary); text-align: center; padding: 14px; margin-bottom: 0;">
-        <div style="font-size: 11.5px; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Total Scrap Sold</div>
+        <div style="font-size: 11.5px; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">${I18N.t('totalScrapSoldLabel')}</div>
         <div style="font-size: 28px; font-weight: 900; color: var(--primary); margin-top: 2px;">${summary.totalWeightSoldKg} kg</div>
-        <div style="font-size: 11px; color: var(--success); font-weight: 700; margin-top: 2px;">Diverted from toxic open dumps</div>
+        <div style="font-size: 11px; color: var(--success); font-weight: 700; margin-top: 2px;">${I18N.t('divertedFromDumpsLabel')}</div>
       </div>
 
       <div class="card" style="border-top: 4px solid #3b82f6; text-align: center; padding: 14px; margin-bottom: 0;">
-        <div style="font-size: 11.5px; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Total Cash Received</div>
+        <div style="font-size: 11.5px; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">${I18N.t('totalCashReceivedLabel')}</div>
         <div style="font-size: 28px; font-weight: 900; color: #1e40af; margin-top: 2px;">₹${summary.totalCashReceived.toLocaleString('en-IN')}</div>
-        <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">100% fair doorstep payout</div>
+        <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">${I18N.t('fairDoorstepPayoutLabel')}</div>
       </div>
 
       <div class="card" style="border-top: 4px solid var(--accent); text-align: center; padding: 14px; margin-bottom: 0;">
-        <div style="font-size: 11.5px; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Environmental Impact</div>
-        <div style="font-size: 28px; font-weight: 900; color: var(--accent); margin-top: 2px;">🌳 ${summary.totalTreesEquivalent} Trees</div>
-        <div style="font-size: 11px; color: #166534; font-weight: 700; margin-top: 2px;">${summary.totalCo2PreventedKg} kg CO₂ prevented</div>
+        <div style="font-size: 11.5px; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">${I18N.t('environmentalImpactLabel')}</div>
+        <div style="font-size: 28px; font-weight: 900; color: var(--accent); margin-top: 2px;">🌳 ${summary.totalTreesEquivalent} ${I18N.t('treesUnit')}</div>
+        <div style="font-size: 11px; color: #166534; font-weight: 700; margin-top: 2px;">${summary.totalCo2PreventedKg} ${I18N.t('kgCo2PreventedLabel')}</div>
       </div>
     </div>
 
@@ -999,8 +1230,8 @@ function renderCustomerProfileTab(container, tabNavHtml) {
     <div class="card" style="padding: 16px; margin-bottom: 14px;">
       <div class="card-header" style="margin-bottom: 8px;">
         <div>
-          <h4 class="card-title" style="font-size: 15px;">📊 Monthly Scrap Selling Comparison</h4>
-          <p class="card-subtitle" style="font-size: 11.5px;">Tracking how much scrap you have channeled into formal recycling over time</p>
+          <h4 class="card-title" style="font-size: 15px;">📊 ${I18N.t('monthlyComparisonTitle')}</h4>
+          <p class="card-subtitle" style="font-size: 11.5px;">${I18N.t('monthlyComparisonSubtitle')}</p>
         </div>
       </div>
 
@@ -1008,15 +1239,15 @@ function renderCustomerProfileTab(container, tabNavHtml) {
         <table style="width: 100%; border-collapse: collapse; font-size: 13px; text-align: left;">
           <thead>
             <tr style="border-bottom: 2px solid var(--border); color: var(--text-muted); text-transform: uppercase; font-size: 11px;">
-              <th style="padding: 8px;">Period</th>
-              <th style="padding: 8px;">Weight Sold</th>
-              <th style="padding: 8px;">Pickups</th>
-              <th style="padding: 8px;">Cash Earned</th>
-              <th style="padding: 8px;">Growth vs Prior</th>
+              <th style="padding: 8px;">${I18N.t('periodCol')}</th>
+              <th style="padding: 8px;">${I18N.t('weightSoldCol')}</th>
+              <th style="padding: 8px;">${I18N.t('pickupsCol')}</th>
+              <th style="padding: 8px;">${I18N.t('cashEarnedCol')}</th>
+              <th style="padding: 8px;">${I18N.t('growthVsPriorCol')}</th>
             </tr>
           </thead>
           <tbody>
-            ${monthlyRowsHtml || `<tr><td colspan="5" style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 12.5px;">No transactions yet</td></tr>`}
+            ${monthlyRowsHtml || `<tr><td colspan="5" style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 12.5px;">${I18N.t('noTransactionsYet')}</td></tr>`}
           </tbody>
         </table>
       </div>
@@ -1026,8 +1257,8 @@ function renderCustomerProfileTab(container, tabNavHtml) {
     <div class="card" style="padding: 16px; margin-bottom: 0;">
       <div class="card-header" style="margin-bottom: 8px;">
         <div>
-          <h4 class="card-title" style="font-size: 15px;">📋 Itemized Scrap Sales History</h4>
-          <p class="card-subtitle" style="font-size: 11.5px;">All verified doorstep pickups with scrap dealers and CPCB Form-6 safe disposal records</p>
+          <h4 class="card-title" style="font-size: 15px;">📋 ${I18N.t('itemizedHistoryTitle')}</h4>
+          <p class="card-subtitle" style="font-size: 11.5px;">${I18N.t('itemizedHistorySubtitle')}</p>
         </div>
       </div>
 
@@ -1035,22 +1266,225 @@ function renderCustomerProfileTab(container, tabNavHtml) {
         <table style="width: 100%; border-collapse: collapse; text-align: left;">
           <thead>
             <tr style="border-bottom: 2px solid var(--border); color: var(--text-muted); text-transform: uppercase; font-size: 11px;">
-              <th style="padding: 8px;">Date & Tx ID</th>
-              <th style="padding: 8px;">Scrap Dealer & Shop</th>
-              <th style="padding: 8px;">Items Sold</th>
-              <th style="padding: 8px;">Weight & Rate</th>
-              <th style="padding: 8px;">Cash Paid</th>
-              <th style="padding: 8px;">CPCB Green Slip</th>
+              <th style="padding: 8px;">${I18N.t('dateTxIdCol')}</th>
+              <th style="padding: 8px;">${I18N.t('dealerAndShopCol')}</th>
+              <th style="padding: 8px;">${I18N.t('itemsSoldCol')}</th>
+              <th style="padding: 8px;">${I18N.t('weightAndRateCol')}</th>
+              <th style="padding: 8px;">${I18N.t('cashPaidCol')}</th>
+              <th style="padding: 8px;">${I18N.t('cpcbGreenSlipCol')}</th>
             </tr>
           </thead>
           <tbody>
-            ${historyRowsHtml || `<tr><td colspan="6" style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 12.5px;">No transactions yet</td></tr>`}
+            ${historyRowsHtml || `<tr><td colspan="6" style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 12.5px;">${I18N.t('noTransactionsYet')}</td></tr>`}
           </tbody>
         </table>
       </div>
     </div>
+
+    <!-- 5. Community & Institutions -->
+    <div class="card" style="padding: 16px; margin-top: 14px;">
+      <div class="card-header" style="margin-bottom: 8px;">
+        <div>
+          <h4 class="card-title" style="font-size: 15px;">🏫 ${I18N.t('institutionSectionTitle')}</h4>
+          <p class="card-subtitle" style="font-size: 11.5px;">${I18N.t('institutionSectionSubtitle')}</p>
+        </div>
+      </div>
+      <div id="institutionSectionBody">${renderInstitutionSectionBody()}</div>
+    </div>
+
+    <!-- 6. Fair Rotation Contract -->
+    <div class="card" style="padding: 16px; margin-top: 14px; margin-bottom: 0;">
+      <div class="card-header" style="margin-bottom: 8px;">
+        <div>
+          <h4 class="card-title" style="font-size: 15px;">🤝 ${I18N.t('contractSectionTitle')}</h4>
+          <p class="card-subtitle" style="font-size: 11.5px;">${I18N.t('contractSectionSubtitle')}</p>
+        </div>
+      </div>
+      <div id="contractSectionBody">${renderContractSectionBody()}</div>
+    </div>
+
+    <div id="passportModalContainer"></div>
+  `;
+
+  if (AppState.myContract === undefined) loadMyContract();
+}
+
+// -------------------------------------------------------------
+// COMMUNITY & INSTITUTIONS + FAIR ROTATION CONTRACTS (Phase 7)
+// Modeled as a lightweight extension of the existing customer role rather than a new
+// top-level role, to avoid restructuring renderApp's role switch.
+// -------------------------------------------------------------
+function renderInstitutionSectionBody() {
+  const inst = AppState.myInstitution;
+  if (!inst) {
+    return `
+      <div class="desktop-grid-2" style="gap: 10px;">
+        <input id="instName" class="form-input" placeholder="${I18N.t('institutionNamePlaceholder')}">
+        <select id="instType" class="form-input">
+          <option value="College">${I18N.t('instTypeCollege')}</option>
+          <option value="School">${I18N.t('instTypeSchool')}</option>
+          <option value="Office">${I18N.t('instTypeOffice')}</option>
+          <option value="Society">${I18N.t('instTypeSociety')}</option>
+        </select>
+      </div>
+      <button class="btn-primary" style="width:100%; padding:9px; font-size:12.5px; margin-top:8px;" onclick="registerInstitution()">
+        ${I18N.t('registerInstitutionBtn')}
+      </button>
+    `;
+  }
+  return `
+    <div style="font-size:13px;"><strong>${inst.name}</strong> (${inst.type})</div>
+    ${inst.linkedKabadiwalaName ? `
+      <div style="font-size:12px; color:var(--success); margin-top:4px;">✅ ${I18N.tf('linkedDealerLabel', { name: inst.linkedKabadiwalaName })}</div>
+    ` : `
+      <button class="btn-secondary" style="margin-top:8px; padding:7px 12px; font-size:12px;" onclick="linkNearestDealerToInstitution()">
+        📍 ${I18N.t('linkNearestDealerBtn')}
+      </button>
+    `}
   `;
 }
+
+window.registerInstitution = async () => {
+  const name = document.getElementById('instName').value.trim();
+  const type = document.getElementById('instType').value;
+  if (!name) return alert(I18N.t('enterInstitutionNameAlert'));
+  try {
+    const coords = AppState.myCoords;
+    const inst = await API.createInstitution({
+      name, type, contactName: AppState.user.name, phone: AppState.user.phone,
+      location: AppState.user.location, latitude: coords ? coords.latitude : undefined, longitude: coords ? coords.longitude : undefined
+    });
+    AppState.myInstitution = inst;
+    document.getElementById('institutionSectionBody').innerHTML = renderInstitutionSectionBody();
+  } catch (err) {
+    alert(`❌ ${err.message}`);
+  }
+};
+
+window.linkNearestDealerToInstitution = async () => {
+  if (!AppState.myInstitution || !ESETU_DATA.kabadiwalas.length) return;
+  const coords = AppState.myCoords;
+  const nearest = coords
+    ? ESETU_DATA.kabadiwalas.slice().sort((a, b) =>
+        (GeoUtils.haversineKm(coords.latitude, coords.longitude, a.latitude, a.longitude) ?? Infinity) -
+        (GeoUtils.haversineKm(coords.latitude, coords.longitude, b.latitude, b.longitude) ?? Infinity))[0]
+    : ESETU_DATA.kabadiwalas[0];
+  try {
+    const updated = await API.linkInstitutionDealer(AppState.myInstitution.id, { kabadiwalaId: nearest.id, kabadiwalaName: nearest.name });
+    AppState.myInstitution = updated;
+    document.getElementById('institutionSectionBody').innerHTML = renderInstitutionSectionBody();
+  } catch (err) {
+    alert(`❌ ${err.message}`);
+  }
+};
+
+async function loadMyContract() {
+  AppState.myContract = null;
+  try {
+    const contracts = await API.listContracts(AppState.user.phone);
+    if (contracts.length) {
+      AppState.myContract = contracts[0];
+      const el = document.getElementById('contractSectionBody');
+      if (el) el.innerHTML = renderContractSectionBody();
+    }
+  } catch {}
+}
+
+function renderContractSectionBody() {
+  const contract = AppState.myContract;
+  if (!contract) {
+    const tracked = AppState.trackedKabadiwala || ESETU_DATA.kabadiwalas[0];
+    if (!tracked) return `<div style="font-size:12.5px; color:var(--text-muted);">${I18N.t('noDealersAvailableYet')}</div>`;
+    return `
+      <div style="font-size:12.5px; color:var(--text-muted); margin-bottom:8px;">${I18N.t('noContractYet')}</div>
+      <button class="btn-primary" style="padding:9px 14px; font-size:12.5px;" onclick="startFairRotationContract('${tracked.id}', '${tracked.name}')">
+        ${I18N.t('startContractBtn')} — ${tracked.name}
+      </button>
+    `;
+  }
+
+  const startMs = new Date(contract.startDate).getTime();
+  const endMs = startMs + contract.durationDays * 86400000;
+  const daysRemaining = Math.ceil((endMs - Date.now()) / 86400000);
+  const expired = daysRemaining <= 0;
+
+  return `
+    <div style="font-size:13px;"><strong>${contract.kabadiwalaName}</strong> — ${I18N.tf('dayRotationLabel', { days: contract.durationDays })}</div>
+    <div style="font-size:12.5px; color:${expired ? 'var(--danger)' : 'var(--success)'}; margin-top:4px; font-weight:700;">
+      ${expired ? I18N.t('contractExpired') : `${daysRemaining} ${I18N.t('daysRemainingLabel')}`}
+    </div>
+    ${expired ? `
+      <div style="display:flex; gap:8px; margin-top:8px;">
+        <button class="btn-primary" style="padding:7px 12px; font-size:12px;" onclick="renewMyContract(${contract.id})">🔄 ${I18N.t('renewBtn')}</button>
+        <button class="btn-secondary" style="padding:7px 12px; font-size:12px;" onclick="switchMyContractDealer(${contract.id})">🔀 ${I18N.t('switchDealerBtn')}</button>
+      </div>
+    ` : ''}
+  `;
+}
+
+window.startFairRotationContract = async (kabadiwalaId, kabadiwalaName) => {
+  try {
+    const contract = await API.createContract({
+      customerId: AppState.user.phone, customerType: AppState.myInstitution ? 'institution' : 'customer',
+      customerName: AppState.user.name, kabadiwalaId, kabadiwalaName, durationDays: 15
+    });
+    AppState.myContract = contract;
+    document.getElementById('contractSectionBody').innerHTML = renderContractSectionBody();
+  } catch (err) {
+    alert(`❌ ${err.message}`);
+  }
+};
+
+window.renewMyContract = async (contractId) => {
+  const updated = await API.renewContract(contractId);
+  AppState.myContract = updated;
+  document.getElementById('contractSectionBody').innerHTML = renderContractSectionBody();
+};
+
+window.switchMyContractDealer = async (contractId) => {
+  const others = ESETU_DATA.kabadiwalas.filter(k => k.name !== AppState.myContract.kabadiwalaName);
+  const next = others[0] || ESETU_DATA.kabadiwalas[0];
+  const updated = await API.switchContract(contractId, { kabadiwalaId: next.id, kabadiwalaName: next.name });
+  AppState.myContract = updated;
+  document.getElementById('contractSectionBody').innerHTML = renderContractSectionBody();
+};
+
+// Digital Scrap Passport — a per-item handover record (photo + GPS + weight + dealer +
+// timestamp), styled like the existing recycler CPCB certificate modal.
+window.viewDigitalPassport = (bookingId) => {
+  const tx = (AppState.customerProfileData && AppState.customerProfileData.history || []).find(b => b.id === bookingId);
+  if (!tx) return;
+
+  const modalEl = document.getElementById('passportModalContainer');
+  const gpsText = (tx.gpsLat && tx.gpsLng) ? `${Number(tx.gpsLat).toFixed(5)}° N, ${Number(tx.gpsLng).toFixed(5)}° E` : I18N.t('gpsNotCapturedText');
+
+  modalEl.innerHTML = `
+    <div class="modal-overlay">
+      <div class="modal-content" style="border-top: 6px solid #16a34a; max-width: 460px;">
+        <button class="modal-close" onclick="document.getElementById('passportModalContainer').innerHTML=''">✕</button>
+
+        <div style="text-align: center; margin-bottom: 14px;">
+          <div style="font-size: 36px;">🌱</div>
+          <h3 style="font-size: 17px; font-weight: 900; color: #14532d;">${I18N.t('digitalPassportTitle')}</h3>
+          <div style="font-size: 11.5px; color: var(--text-muted);">${I18N.t('bookingLabel')} <code>${tx.bookingCode}</code></div>
+        </div>
+
+        ${tx.photoDataUrl ? `<img src="${tx.photoDataUrl}" style="width:100%; max-height:200px; object-fit:cover; border-radius: var(--radius-sm); margin-bottom: 12px; border: 1px solid var(--border);">` : ''}
+
+        <div style="background: #f8fafc; border: 1.5px solid var(--border); padding: 14px; border-radius: var(--radius-sm); font-size: 13px; line-height: 1.7;">
+          <div><strong>${I18N.t('materialLabel')}</strong> ${tx.materialName} ${tx.qualityGrade ? `(${I18N.t('qualityGradeLabel')} ${tx.qualityGrade})` : ''}</div>
+          <div><strong>${I18N.t('weightLabelShort')}</strong> ${tx.weightKg} kg @ ₹${tx.ratePerKg}/kg</div>
+          <div><strong>${I18N.t('cashPaidLabel')}</strong> ₹${Number(tx.totalAmount).toLocaleString('en-IN')} (${tx.paymentMode})</div>
+          <div><strong>${I18N.t('collectorLabel')}</strong> ${tx.kabadiwalaName}</div>
+          <div><strong>${I18N.t('gpsHandoverProofLabel')}</strong> ${gpsText}</div>
+          <div><strong>${I18N.t('requestedLabel')}</strong> ${new Date(tx.createdAt).toLocaleString()}</div>
+          <div><strong>${I18N.t('completedLabel')}</strong> ${new Date(tx.completedAt).toLocaleString()}</div>
+          ${tx.pooledLotId ? `<div>🔗 <strong>${I18N.t('pooledIntoLabel')}</strong> <code>${tx.pooledLotId}</code></div>` : ''}
+        </div>
+      </div>
+    </div>
+  `;
+};
 
 // Window helper functions for customer actions
 window.selectCustomerMaterial = (matId) => {
@@ -1064,14 +1498,228 @@ window.selectCustomerMaterial = (matId) => {
 
 window.adjustWeight = (delta) => {
   AppState.calculatorWeight = Math.max(0.1, Number((AppState.calculatorWeight + delta).toFixed(2)));
+  AppState.scaleReading = null;
   const container = document.getElementById('appContent');
   renderCustomerPage(container);
 };
 
 window.setWeight = (w) => {
   AppState.calculatorWeight = Number(w);
+  AppState.scaleReading = null;
   const container = document.getElementById('appContent');
   renderCustomerPage(container);
+};
+
+// Smart Weighing — no real Bluetooth/serial scale hardware is available in this environment,
+// so this is an honestly-labeled simulation: a real, interactive multi-step connect flow
+// (not a static image) that settles on a plausible reading and feeds it straight into the
+// same weight state the manual stepper uses.
+window.connectSmartScale = () => {
+  const widget = document.getElementById('smartScaleWidget');
+  if (!widget) return;
+
+  widget.innerHTML = `<div style="text-align:center; font-size:12px; font-weight:700; color:#1d4ed8; padding:7px;">🔎 ${I18N.t('scaleSearching')}</div>`;
+
+  setTimeout(() => {
+    if (!document.getElementById('smartScaleWidget')) return;
+    widget.innerHTML = `<div style="text-align:center; font-size:12px; font-weight:700; color:#166534; padding:7px;">🔗 ${I18N.t('scaleConnected')}</div>`;
+
+    setTimeout(() => {
+      if (!document.getElementById('smartScaleWidget')) return;
+      // Settle on a plausible reading around the current weight (±150g), rounded to 10g.
+      const base = Number(AppState.calculatorWeight) || 0.2;
+      const jitter = (Math.random() - 0.5) * 0.3;
+      const settled = Math.max(0.1, Math.round((base + jitter) * 100) / 100);
+      AppState.calculatorWeight = settled;
+      AppState.scaleReading = { weightKg: settled };
+      const container = document.getElementById('appContent');
+      renderCustomerPage(container);
+      I18N.speak(I18N.tf('scaleConnectedSpeech', { grams: Math.round(settled * 1000) }));
+    }, 1200);
+  }, 900);
+};
+
+// Shared speech-recognition factory — feature-detected the same way I18N.speak
+// feature-detects speechSynthesis. Returns null (never throws) when unsupported.
+function createSpeechRecognizer(lang) {
+  const Recognizer = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!Recognizer) return null;
+  const recognition = new Recognizer();
+  recognition.lang = lang || I18N.langMap[I18N.currentLang] || 'en-IN';
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
+  return recognition;
+}
+
+// Shared keyword matcher: scores each material by how many of its own significant name
+// words (>3 chars, any of the 7 localized names or the symbol) appear in the given text,
+// and returns the best-scoring material (or null if nothing matched at all). Splitting the
+// material's own name into words — rather than testing the whole name as one substring —
+// is what lets "copper wire" match "Copper Cables & Insulated Wiring".
+function findMaterialInText(text) {
+  let best = null;
+  let bestScore = 0;
+  for (const m of ESETU_DATA.materials) {
+    const names = [m.name, m.nameHi, m.nameMr, m.nameTa, m.nameTe, m.nameKn, m.nameMl].filter(Boolean);
+    let score = 0;
+    for (const n of names) {
+      const words = n.toLowerCase().replace(/[()/]/g, ' ').split(/[\s,&-]+/).filter((w) => w.length > 3);
+      for (const w of words) {
+        if (text.includes(w)) score++;
+      }
+    }
+    if (m.symbol && text.includes(m.symbol.toLowerCase())) score += 2;
+    if (score > bestScore) { bestScore = score; best = m; }
+  }
+  return bestScore > 0 ? best : null;
+}
+
+// Voice Selling — speak a material name and a weight; a rule-based keyword/regex parser
+// (checking every localized name field already on each material, plus a unit-aware weight
+// regex) fills the calculator, the same way tapping the chips or stepper would.
+function parseVoiceSellCommand(transcript) {
+  const text = transcript.toLowerCase();
+  const matchedMaterial = findMaterialInText(text);
+
+  let weightKg = null;
+  const match = text.match(/(\d+(\.\d+)?)\s*(kg|kilo|kilogram|gram|grams|g)\b/);
+  if (match) {
+    const value = parseFloat(match[1]);
+    const unit = match[3];
+    const isKiloUnit = unit === 'kg' || unit.startsWith('kilo');
+    weightKg = isKiloUnit ? value : value / 1000;
+  }
+
+  return { material: matchedMaterial, weightKg };
+}
+
+window.startVoiceSelling = () => {
+  const statusEl = document.getElementById('voiceSellStatus');
+  const recognition = createSpeechRecognizer();
+  if (!recognition) {
+    if (statusEl) statusEl.textContent = I18N.t('voiceUnsupported');
+    return;
+  }
+
+  if (statusEl) statusEl.textContent = `🎙️ ${I18N.t('voiceListening')}`;
+
+  recognition.onresult = (event) => {
+    const transcript = event.results[0][0].transcript;
+    const { material, weightKg } = parseVoiceSellCommand(transcript);
+
+    if (material) { AppState.selectedMaterial = material; AppState.aiScanResult = null; }
+    if (weightKg && weightKg > 0) { AppState.calculatorWeight = Math.round(weightKg * 100) / 100; AppState.scaleReading = null; }
+
+    const container = document.getElementById('appContent');
+    renderCustomerPage(container);
+
+    const heardMsg = document.getElementById('voiceSellStatus');
+    if (heardMsg) heardMsg.textContent = `${I18N.t('voiceHeard')} "${transcript}"`;
+    if (material || weightKg) {
+      I18N.speak(`${material ? getLocalizedMatName(material) : ''} ${weightKg ? Math.round(weightKg * 1000) + ' ' + I18N.t('gramsUnit') : ''}`.trim());
+    }
+  };
+
+  recognition.onerror = () => {
+    if (statusEl) statusEl.textContent = I18N.t('voiceNotHeard');
+  };
+
+  recognition.start();
+};
+
+// AI Voice Assistant — composes answers from LIVE app data (current rates, real nearest
+// dealer, real safety guidance) via a small rule-based intent matcher. Not a network LLM
+// call: fully offline, deterministic, and reflects whatever the platform's data says right
+// now (e.g. answers change immediately after a recycler edits a rate).
+function matchAssistantIntent(query) {
+  const text = query.toLowerCase();
+
+  // 1) Price lookup — "what's the price of copper" / "rate for pcb"
+  const priceMat = findMaterialInText(text);
+  if (priceMat && /price|rate|cost|worth|value|kitna|kimmat|daam/.test(text)) {
+    return I18N.tf('assistantPriceAnswer', { matName: getLocalizedMatName(priceMat), customerRate: priceMat.customerRate, recyclerRate: priceMat.recyclerRate });
+  }
+
+  // 2) Nearest dealer
+  if (/near|nearby|dealer|kabadiwala|collector/.test(text)) {
+    if (!ESETU_DATA.kabadiwalas.length) return I18N.t('assistantNoDealersAnswer');
+    const nearest = AppState.myCoords
+      ? ESETU_DATA.kabadiwalas.slice().sort((a, b) =>
+          GeoUtils.haversineKm(AppState.myCoords.latitude, AppState.myCoords.longitude, a.latitude, a.longitude) -
+          GeoUtils.haversineKm(AppState.myCoords.latitude, AppState.myCoords.longitude, b.latitude, b.longitude))[0]
+      : ESETU_DATA.kabadiwalas[0];
+    return I18N.tf('assistantNearestDealerAnswer', { name: nearest.name, shop: nearest.shopName, location: nearest.location, mins: nearest.etaMinutes });
+  }
+
+  // 3) Safety guidance — keyword matching stays against the English title (queries are
+  // matched in whatever language the user typed, and the English topic words like
+  // "copper"/"battery"/"acid" are stable keys), but the ANSWER is fully localized.
+  for (const guide of ESETU_DATA.safetyGuides || []) {
+    const keyword = guide.title.toLowerCase().split(':').pop().trim().split(' ')[0];
+    if (keyword && text.includes(keyword)) {
+      return `${localizedField(guide, 'title')}. ${localizedField(guide, 'safeMethod')}`;
+    }
+  }
+  if (/safe|hazard|danger|burn|acid/.test(text) && ESETU_DATA.safetyGuides && ESETU_DATA.safetyGuides.length) {
+    const g = ESETU_DATA.safetyGuides[0];
+    return `${localizedField(g, 'title')}. ${localizedField(g, 'safeMethod')}`;
+  }
+
+  // 4) Fallback — how it works
+  return I18N.t('assistantFallbackAnswer');
+}
+
+window.openVoiceAssistantModal = () => {
+  let modalContainer = document.getElementById('voiceAssistantOverlay');
+  if (!modalContainer) {
+    modalContainer = document.createElement('div');
+    modalContainer.id = 'voiceAssistantOverlay';
+    document.body.appendChild(modalContainer);
+  }
+
+  modalContainer.innerHTML = `
+    <div class="modal-overlay">
+      <div class="modal-content" style="max-width: 480px;">
+        <button class="modal-close" onclick="document.getElementById('voiceAssistantOverlay').innerHTML=''">✕</button>
+        <h3 style="font-size: 17px; font-weight: 800; color: var(--primary-dark); margin-bottom: 4px;">
+          🎙️ ${I18N.t('assistantTitle')}
+        </h3>
+        <p style="font-size: 12.5px; color: var(--text-muted); margin-bottom: 12px;">${I18N.t('assistantSubtitle')}</p>
+
+        <div style="display: flex; gap: 8px; margin-bottom: 10px;">
+          <input id="assistantQueryInput" class="form-input" placeholder="${I18N.t('assistantPlaceholder')}" onkeydown="if(event.key==='Enter') askVoiceAssistant()">
+          <button class="btn-secondary" style="width: auto; padding: 0 14px; border-color: #a855f7; color: #7e22ce;" onclick="startAssistantVoiceInput()">🎙️</button>
+        </div>
+        <button class="btn-primary" style="width: 100%; padding: 10px; font-size: 13px;" onclick="askVoiceAssistant()">
+          ${I18N.t('assistantAskBtn')}
+        </button>
+
+        <div id="assistantAnswerBox" style="margin-top: 14px; min-height: 40px; font-size: 13.5px; color: var(--text-main); background: #f0fdf4; border: 1.5px solid #86efac; border-radius: var(--radius-sm); padding: 12px; display: none;"></div>
+      </div>
+    </div>
+  `;
+};
+
+window.startAssistantVoiceInput = () => {
+  const recognition = createSpeechRecognizer();
+  if (!recognition) { alert(I18N.t('voiceUnsupported')); return; }
+  recognition.onresult = (event) => {
+    document.getElementById('assistantQueryInput').value = event.results[0][0].transcript;
+    askVoiceAssistant();
+  };
+  recognition.start();
+};
+
+window.askVoiceAssistant = () => {
+  const input = document.getElementById('assistantQueryInput');
+  const query = input.value.trim();
+  if (!query) return;
+
+  const answer = matchAssistantIntent(query);
+  const box = document.getElementById('assistantAnswerBox');
+  box.style.display = 'block';
+  box.textContent = answer;
+  I18N.speak(answer);
 };
 
 window.selectPaymentMode = (mode) => {
@@ -1095,36 +1743,157 @@ window.triggerCameraMock = () => {
   if (input) input.click();
 };
 
+// AI Scrap Scanner & Quality Checker — a deterministic (non-network, offline-capable)
+// classification: the same photo always identifies as the same material/grade, a
+// different photo yields a different (but stable) result. See js/priceUtils.js.
+function renderAiDetectionCard(scan) {
+  const matName = getLocalizedMatName(scan.material).split('(')[0];
+  const gradeColor = scan.grade === 'A' ? '#166534' : (scan.grade === 'B' ? '#92400e' : '#9f1239');
+  const gradeBg = scan.grade === 'A' ? '#dcfce7' : (scan.grade === 'B' ? '#fef3c7' : '#fee2e2');
+  return `
+    <div id="aiDetectionCard" style="background: #f0fdf4; border: 1.5px solid #86efac; border-radius: var(--radius-sm); padding: 12px; margin-top: 10px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px;">
+        <span style="font-size: 12.5px; font-weight: 800; color: #166534;">🤖 ${I18N.t('detectResult')}</span>
+        <span style="font-size: 11px; background: #166534; color: #fff; padding: 2px 6px; border-radius: 4px; font-weight: 700;">${scan.confidencePct}% Match</span>
+      </div>
+      <div style="font-size: 14px; font-weight: 800; color: #064e3b; margin-top: 4px;">
+        ${scan.material.icon} ${matName}
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px; flex-wrap: wrap;">
+        <div style="font-size: 12.5px; color: #15803d;">
+          💰 ${I18N.t('detectedRateLabel')} <strong>₹${scan.material.customerRate} / kg</strong>
+        </div>
+        <span style="font-size: 11px; background: ${gradeBg}; color: ${gradeColor}; padding: 2px 8px; border-radius: 4px; font-weight: 800;">
+          ${I18N.t('qualityGradeLabel')} ${scan.grade} — ${scan.gradeLabel} (${scan.qualityMultiplier}x)
+        </span>
+      </div>
+      <p style="font-size: 10.5px; color: #4d7c0f; margin-top: 6px;">${I18N.t('aiSimulatedNotice')}</p>
+    </div>
+  `;
+}
+
 window.handleImageSelected = (e) => {
-  const card = document.getElementById('aiDetectionCard');
-  if (card) {
-    card.style.display = 'block';
-    I18N.speak('Scrap item analyzed. High-grade server circuit board detected. Value: 950 rupees per kg.');
-  }
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+
+  const scan = PriceUtils.classifyImageDeterministic(file, ESETU_DATA.materials);
+  if (!scan) return;
+
+  AppState.aiScanResult = scan;
+  AppState.selectedMaterial = scan.material; // the "AI" pick becomes the active material for the calculator
+  AppState.capturedImage = file; // downscaled/attached to a booking as handover proof (see Phase 2)
+
+  const container = document.getElementById('appContent');
+  renderCustomerPage(container);
+
+  const matName = getLocalizedMatName(scan.material).split('(')[0];
+  I18N.speak(I18N.tf('scanAnalyzedSpeech', { matName, grade: scan.grade, rate: scan.material.customerRate }));
 };
 
-window.bookPickupFromCalculator = () => {
+// Verified Handover & Proof: captures real GPS + the AI-scanned photo (downscaled) at the
+// moment the pickup is actually requested, and persists a real customer_bookings row —
+// this is what makes the Digital Scrap Passport and Environmental Tracker real instead of
+// permanently-empty stubs.
+async function createRealBooking(tracked) {
+  const weightKg = Number(AppState.calculatorWeight) || 0.2;
+  const mat = AppState.selectedMaterial;
+  const scan = AppState.aiScanResult;
+  const qualityMultiplier = (scan && scan.material.id === mat.id) ? scan.qualityMultiplier : 1.0;
+  const qualityGrade = (scan && scan.material.id === mat.id) ? scan.grade : null;
+
+  const [coords, photoDataUrl] = await Promise.all([
+    getBrowserCoordinates(),
+    downscaleImageToDataUrl(AppState.capturedImage)
+  ]);
+
+  const payload = {
+    customerPhone: AppState.user.phone,
+    customerName: AppState.user.name,
+    kabadiwalaId: tracked.id,
+    kabadiwalaName: tracked.name,
+    materialId: mat.id,
+    weightKg,
+    qualityGrade,
+    qualityMultiplier,
+    paymentMode: AppState.selectedPaymentMode,
+    gpsLat: coords ? coords.latitude : undefined,
+    gpsLng: coords ? coords.longitude : undefined,
+    photoDataUrl
+  };
+
+  // Offline Mode: queue the write instead of failing outright when there's no connectivity
+  // (or the request itself fails to reach the server) — synced automatically once back online.
+  if (!navigator.onLine) {
+    return queueOfflineBooking(payload);
+  }
+  try {
+    const booking = await API.createBooking(payload);
+    AppState.activeBooking = booking;
+    return booking;
+  } catch (err) {
+    if (err instanceof TypeError) return queueOfflineBooking(payload); // network-level failure
+    throw err; // a real server-side validation error — surface it, don't silently queue it
+  }
+}
+
+function queueOfflineBooking(payload) {
+  AppState.syncQueue.push({ type: 'booking', payload, queuedAt: new Date().toISOString() });
+  saveSyncQueue();
+  const localWeight = payload.weightKg;
+  const localTotal = Math.round(localWeight * AppState.selectedMaterial.customerRate * (payload.qualityMultiplier || 1));
+  AppState.activeBooking = null; // no real id yet — it's created once synced
+  return { bookingCode: 'QUEUED — offline', totalAmount: localTotal, gpsLat: payload.gpsLat, photoDataUrl: payload.photoDataUrl, queued: true };
+}
+
+window.bookPickupFromCalculator = async () => {
   const tracked = ESETU_DATA.kabadiwalas[0];
   AppState.trackedKabadiwala = tracked;
-  const payout = (AppState.calculatorWeight * AppState.selectedMaterial.customerRate).toFixed(0);
-  AppState.activeBookingNotice = `✅ Doorstep Pickup Requested! <strong>${tracked.name}</strong> (${tracked.shopName}) is on the way. Estimated cash: <strong>₹${Number(payout).toLocaleString('en-IN')}</strong>.`;
-  I18N.speak(`Doorstep pickup booked with ${tracked.name}. Estimated arrival in ${tracked.etaMinutes} minutes.`);
+  AppState.deliveryStartedAt = Date.now();
+  try {
+    const booking = await createRealBooking(tracked);
+    AppState.activeBookingNotice = `✅ Doorstep Pickup Requested! <strong>${tracked.name}</strong> (${tracked.shopName}) is on the way. Estimated cash: <strong>₹${Number(booking.totalAmount).toLocaleString('en-IN')}</strong>. Booking: <code>${booking.bookingCode}</code>${booking.gpsLat ? ' 📍 GPS captured' : ''}${booking.photoDataUrl ? ' 📸 Photo attached' : ''}`;
+    I18N.speak(I18N.tf('pickupBookedSpeech', { name: tracked.name, mins: tracked.etaMinutes }));
+  } catch (err) {
+    AppState.activeBookingNotice = `❌ Could not book pickup: ${err.message}`;
+  }
   AppState.customerTab = 'dealers';
   const container = document.getElementById('appContent');
   renderCustomerPage(container);
   window.scrollTo({ top: 0, behavior: 'smooth' });
 };
 
-window.bookPickupFromKabadiwala = (kabadiName) => {
+window.bookPickupFromKabadiwala = async (kabadiName) => {
   const found = ESETU_DATA.kabadiwalas.find(k => k.name === kabadiName || k.name.includes(kabadiName)) || ESETU_DATA.kabadiwalas[0];
   AppState.trackedKabadiwala = found;
-  const payout = (AppState.calculatorWeight * AppState.selectedMaterial.customerRate).toFixed(0);
-  AppState.activeBookingNotice = `✅ Pickup Confirmed! <strong>${found.name}</strong> (${found.shopName}) is dispatched with digital scale. Cash: <strong>₹${Number(payout).toLocaleString('en-IN')}</strong>.`;
-  I18N.speak(`Pickup confirmed with ${found.name}. Arriving in ${found.etaMinutes} minutes.`);
+  AppState.deliveryStartedAt = Date.now();
+  try {
+    const booking = await createRealBooking(found);
+    AppState.activeBookingNotice = `✅ Pickup Confirmed! <strong>${found.name}</strong> (${found.shopName}) is dispatched with digital scale. Cash: <strong>₹${Number(booking.totalAmount).toLocaleString('en-IN')}</strong>. Booking: <code>${booking.bookingCode}</code>${booking.gpsLat ? ' 📍 GPS captured' : ''}${booking.photoDataUrl ? ' 📸 Photo attached' : ''}`;
+    I18N.speak(I18N.tf('pickupConfirmedSpeech', { name: found.name, mins: found.etaMinutes }));
+  } catch (err) {
+    AppState.activeBookingNotice = `❌ Could not book pickup: ${err.message}`;
+  }
   AppState.customerTab = 'dealers';
   const container = document.getElementById('appContent');
   renderCustomerPage(container);
   window.scrollTo({ top: 0, behavior: 'smooth' });
+};
+
+// Stands in for the dealer-side confirmation step (this demo has no separate dealer-facing
+// booking inbox) — the customer taps this once cash/scrap has actually changed hands.
+window.markBookingCollected = async () => {
+  if (!AppState.activeBooking) return;
+  try {
+    await API.completeBooking(AppState.activeBooking.id);
+    AppState.activeBookingNotice = `✅ Handover complete! Your Digital Scrap Passport is ready in your Profile tab.`;
+    AppState.activeBooking = null;
+    AppState.deliveryStartedAt = null;
+    AppState.customerProfileData = null; // force a fresh summary fetch next time Profile is opened
+    const container = document.getElementById('appContent');
+    renderCustomerPage(container);
+  } catch (err) {
+    alert(`❌ ${I18N.tf('couldNotCompleteHandoverMsg', { error: err.message })}`);
+  }
 };
 
 // -------------------------------------------------------------
@@ -1137,17 +1906,17 @@ window.bookPickupFromKabadiwala = (kabadiName) => {
 // snapshot of recycler buying rates, not a live-updating ticker. Rates only
 // change when a recycler explicitly publishes a new rate (see promptRateUpdate).
 const MATERIAL_CATEGORY_GROUPS = [
-  { key: 'metals', icon: '🔩', en: 'Metals & Wires', hi: 'धातु व तार', mr: 'धातू व तारा', symbols: ['CU-WIRE', 'MOT-MAG'] },
-  { key: 'circuits', icon: '💻', en: 'Circuit Boards', hi: 'सर्किट बोर्ड', mr: 'सर्किट बोर्ड', symbols: ['PCB-HI'] },
-  { key: 'batteries', icon: '🔋', en: 'Batteries', hi: 'बैटरी', mr: 'बॅटरी', symbols: ['LI-BATT'] },
-  { key: 'glass', icon: '📺', en: 'Glass & Displays', hi: 'कांच व डिस्प्ले', mr: 'काच व डिस्प्ले', symbols: ['CRT-GLS', 'LCD-SCR'] },
-  { key: 'plastics', icon: '♻️', en: 'Plastics', hi: 'प्लास्टिक', mr: 'प्लास्टिक', symbols: ['PLAS-MIX'] }
+  { key: 'metals', icon: '🔩', labelKey: 'categoryMetalsWires', symbols: ['CU-WIRE', 'MOT-MAG'] },
+  { key: 'circuits', icon: '💻', labelKey: 'categoryCircuitBoards', symbols: ['PCB-HI'] },
+  { key: 'batteries', icon: '🔋', labelKey: 'categoryBatteries', symbols: ['LI-BATT'] },
+  { key: 'glass', icon: '📺', labelKey: 'categoryGlassDisplays', symbols: ['CRT-GLS', 'LCD-SCR'] },
+  { key: 'plastics', icon: '♻️', labelKey: 'categoryPlastics', symbols: ['PLAS-MIX'] }
 ];
 
+// Fully translated across all 7 languages (previously only had en/hi/mr, so Tamil, Telugu,
+// Kannada, and Malayalam users always saw the English category name — fixed here).
 function groupLabel(group) {
-  if (I18N.currentLang === 'mr') return group.mr;
-  if (I18N.currentLang === 'hi') return group.hi;
-  return group.en;
+  return I18N.t(group.labelKey);
 }
 
 function renderKabadiwalaPage(container) {
@@ -1219,6 +1988,7 @@ function renderKabadiwalaExchangeTab(container, tabNavHtml) {
           </td>
           <td style="padding: 12px 8px; color: #166534; font-weight: 700;">₹${m.dayHigh}/kg</td>
           <td style="padding: 12px 8px; color: #991b1b; font-weight: 700;">₹${m.dayLow}/kg</td>
+          <td style="padding: 12px 8px;">${PriceUtils.buildSparklineSvg(m.sparkline, { width: 80, height: 24, color: isUp ? '#16a34a' : '#dc2626' })}</td>
           <td style="padding: 12px 8px;">
             ${ESETU_DATA.recyclers.length ? `
               <button class="btn-primary" style="padding: 6px 12px; font-size: 12px; width: auto;" onclick="openCreateLotModal('${ESETU_DATA.recyclers[0].id}', '${ESETU_DATA.recyclers[0].name}')">
@@ -1249,6 +2019,7 @@ function renderKabadiwalaExchangeTab(container, tabNavHtml) {
                 <th>${I18N.t('changeCol')}</th>
                 <th>${I18N.t('dayHighCol')}</th>
                 <th>${I18N.t('dayLowCol')}</th>
+                <th>${I18N.t('priceHistoryLabel')}</th>
                 <th>${I18N.t('actionCol')}</th>
               </tr>
             </thead>
@@ -1269,7 +2040,7 @@ function renderKabadiwalaExchangeTab(container, tabNavHtml) {
         <strong style="color:#38bdf8; font-size:14px; letter-spacing:0.5px; text-transform: uppercase;">${I18N.t('wholesaleRatesTitle')}</strong>
         <span style="background: rgba(255,255,255,0.1); font-size: 11.5px; padding: 3px 9px; border-radius: 4px; color: #cbd5e1;">${I18N.t('segregatedByType')}</span>
       </div>
-      <button class="audio-btn" style="background:#1e293b; color:#38bdf8; border:1px solid #334155;" onclick="I18N.speak('Wholesale scrap rates by category. Rates update only when a recycler publishes new prices.')">
+      <button class="audio-btn" style="background:#1e293b; color:#38bdf8; border:1px solid #334155;" onclick="I18N.speak(I18N.t('wholesaleRatesSpeech'))">
         ${I18N.t('speakBtn')}
       </button>
     </div>
@@ -1313,7 +2084,28 @@ function renderKabadiwalaWarehouseTab(container, tabNavHtml) {
     `;
   }).join('');
 
-  const recyclersHtml = ESETU_DATA.recyclers.map(r => {
+  // Smart Recycler Matching — real distance from the kabadiwala's own captured
+  // coordinates (Phase 0/4), sorted nearest-first. Falls back to the platform's static
+  // distanceKm text (and original insertion order) when either point is missing.
+  const recyclersWithDistance = ESETU_DATA.recyclers.map(r => {
+    const liveDistanceKm = AppState.myCoords
+      ? GeoUtils.haversineKm(AppState.myCoords.latitude, AppState.myCoords.longitude, r.latitude, r.longitude)
+      : null;
+    return { ...r, liveDistanceKm };
+  });
+  const sortedRecyclers = recyclersWithDistance.slice().sort((a, b) => {
+    if (a.liveDistanceKm === null && b.liveDistanceKm === null) return 0;
+    if (a.liveDistanceKm === null) return 1;
+    if (b.liveDistanceKm === null) return -1;
+    return a.liveDistanceKm - b.liveDistanceKm;
+  });
+
+  // Best Buyer Finder — which recycler currently pays the most for the kabadiwala's
+  // most-traded material (defaults to the first material shown on each card, PCB-HI).
+  const bestBuyerFocusMat = ESETU_DATA.materials.find(m => m.symbol === 'PCB-HI') || ESETU_DATA.materials[0];
+  const bestRateForFocusMat = Math.max(...sortedRecyclers.map(r => (r.rates && r.rates[bestBuyerFocusMat.symbol]) || bestBuyerFocusMat.recyclerRate));
+
+  const recyclersHtml = sortedRecyclers.map(r => {
     const reviewsHtml = r.kabadiwalaReviews.map(rev => `
       <div class="review-item">
         <div class="review-author">
@@ -1331,10 +2123,16 @@ function renderKabadiwalaWarehouseTab(container, tabNavHtml) {
             <div>
               <h4 style="font-size: 15px; font-weight: 800;">${r.name}</h4>
               <span class="rec-badge-gov">🛡️ ${r.cpcbRegNo}</span>
+              ${r.cpcbVerified
+                ? `<span style="background:#dcfce7; color:#166534; font-size:10.5px; font-weight:800; padding:2px 7px; border-radius:4px; margin-left:4px;">✅ ${I18N.t('cpcbVerifiedBadge')}</span>`
+                : `<span style="background:#fef3c7; color:#92400e; font-size:10.5px; font-weight:800; padding:2px 7px; border-radius:4px; margin-left:4px;">⚠️ ${I18N.t('cpcbUnverifiedBadge')}</span>`}
+              ${(r.rates && r.rates[bestBuyerFocusMat.symbol] || bestBuyerFocusMat.recyclerRate) >= bestRateForFocusMat
+                ? `<span style="background:#ede9fe; color:#5b21b6; font-size:10.5px; font-weight:800; padding:2px 7px; border-radius:4px; margin-left:4px;">🏆 ${I18N.t('bestPayerBadge')}</span>`
+                : ''}
             </div>
             <div style="text-align: right;">
               <div style="font-size: 13px; font-weight: 800; color: #b45309;">★ ${r.rating}</div>
-              <div style="font-size: 11px; color: var(--text-muted);">${r.kabadiwalaReviewsCount} dealer reviews</div>
+              <div style="font-size: 11px; color: var(--text-muted);">${r.kabadiwalaReviewsCount} ${I18N.t('dealerReviewsUnit')}</div>
             </div>
           </div>
 
@@ -1342,7 +2140,7 @@ function renderKabadiwalaWarehouseTab(container, tabNavHtml) {
           <div style="background: #f8fafc; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); margin: 10px 0; font-size: 12px; line-height: 1.5;">
             <div>📍 <strong>${I18N.t('facilityLabel')}</strong> ${r.fullAddress}</div>
             <div style="display: flex; justify-content: space-between; margin-top: 4px;">
-              <span>📍 ${I18N.t('distanceLabel')} <strong>${r.distanceKm} km</strong></span>
+              <span>📍 ${I18N.t('distanceLabel')} <strong>${r.liveDistanceKm !== null ? `${r.liveDistanceKm} km ✅` : `${r.distanceKm} km`}</strong></span>
               <span>📦 ${I18N.t('minBatchLabel')} <strong>${r.minLotKg} kg</strong></span>
             </div>
             <div style="color: #065f46; font-weight: 700; margin-top: 4px;">
@@ -1365,11 +2163,14 @@ function renderKabadiwalaWarehouseTab(container, tabNavHtml) {
           <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px;">
             ${['PCB-HI', 'CU-WIRE', 'LI-BATT'].map(sym => {
               const mat = ESETU_DATA.materials.find(m => m.symbol === sym);
-              return mat ? `
-                <span style="background:#ecfdf5; color:#065f46; font-size:11.5px; padding:3px 7px; border-radius:4px; font-weight:700;">
-                  ${mat.symbol}: ₹${mat.recyclerRate}/kg
+              if (!mat) return '';
+              const effectiveRate = (r.rates && r.rates[sym]) || mat.recyclerRate;
+              const isOverride = !!(r.rates && r.rates[sym]);
+              return `
+                <span style="background:#ecfdf5; color:#065f46; font-size:11.5px; padding:3px 7px; border-radius:4px; font-weight:700;" title="${isOverride ? I18N.t('recyclerPublishedRateTitle') : I18N.t('platformSharedRateTitle')}">
+                  ${mat.symbol}: ₹${effectiveRate}/kg${isOverride ? ' ✦' : ''}
                 </span>
-              ` : '';
+              `;
             }).join('')}
           </div>
         </div>
@@ -1413,18 +2214,18 @@ function renderKabadiwalaWarehouseTab(container, tabNavHtml) {
           <div style="display: flex; justify-content: space-between; align-items: flex-start;">
             <div>
               <span style="font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.9;">
-                ${I18N.t('stockpileTitle')} (${AppState.user.yard || 'Warehouse'})
+                ${I18N.t('stockpileTitle')} (${AppState.user.yard || I18N.t('warehouseFallback')})
               </span>
               <div class="hero-metric" style="margin: 10px 0;">
-                ${totalStockWeight} <span style="font-size: 20px; font-weight: 600;">kg In-Stock</span>
+                ${totalStockWeight} <span style="font-size: 20px; font-weight: 600;">${I18N.t('kgInStockUnit')}</span>
               </div>
             </div>
-            <button class="audio-btn" style="background:#fff; color:var(--primary-dark);" onclick="I18N.speak('Total inventory: ${totalStockWeight} kilograms. Current market value: ${totalStockValue} rupees. Projected gross profit: ${totalEstimatedProfit} rupees.')">
+            <button class="audio-btn" style="background:#fff; color:var(--primary-dark);" onclick="I18N.speak(I18N.tf('inventorySpeech', { weight: '${totalStockWeight}', value: '${totalStockValue}', profit: '${totalEstimatedProfit}' }))">
               ${I18N.t('speakBtn')}
             </button>
           </div>
           <p style="font-size: 12.5px; opacity: 0.88; line-height: 1.4; margin-top: 4px;">
-            Aggregated electronic scrap ready for wholesale lot liquidation to government authorized CPCB recycling plants.
+            ${I18N.t('aggregatedScrapDesc')}
           </p>
         </div>
 
@@ -1467,12 +2268,66 @@ function renderKabadiwalaWarehouseTab(container, tabNavHtml) {
       </div>
     </div>
 
+    <!-- Collection Route Optimizer & Smart Collection Day -->
+    <div class="desktop-grid-2" style="gap: 16px; margin-bottom: 20px;">
+      <div class="card" style="margin-bottom: 0;">
+        <div class="card-header">
+          <div>
+            <h3 class="card-title">🗺️ ${I18N.t('routeOptimizerTitle')}</h3>
+            <p class="card-subtitle">${I18N.t('routeOptimizerSubtitle')}</p>
+          </div>
+        </div>
+        <button class="btn-primary" style="width: 100%; padding: 10px; font-size: 13px;" onclick="optimizeMyRoute()">
+          🧭 ${I18N.t('optimizeRouteBtn')}
+        </button>
+        <div id="routeOptimizerResult" style="margin-top: 12px;"></div>
+      </div>
+
+      <div class="card" style="margin-bottom: 0;">
+        <div class="card-header">
+          <div>
+            <h3 class="card-title">💰 ${I18N.t('poolingTitle')}</h3>
+            <p class="card-subtitle">${I18N.t('poolingSubtitle')}</p>
+          </div>
+        </div>
+        <button class="btn-secondary" style="width: 100%; padding: 9px; font-size: 12.5px;" onclick="loadPoolableBookings()">
+          🔄 ${I18N.t('checkPoolableBtn')}
+        </button>
+        <div id="poolingResult" style="margin-top: 10px;"></div>
+      </div>
+
+      <div class="card" style="margin-bottom: 0;">
+        <div class="card-header">
+          <div>
+            <h3 class="card-title">📅 ${I18N.t('collectionDayTitle')}</h3>
+            <p class="card-subtitle">${I18N.t('collectionDaySubtitle')}</p>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">${I18N.t('areaPincodeLabel')}</label>
+          <input type="text" id="scheduleAreaPincode" class="form-input" placeholder="e.g. 411038" value="${(AppState.user.location || '').match(/\d{6}/) ? (AppState.user.location.match(/\d{6}/))[0] : ''}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">${I18N.t('dayOfWeekLabel')}</label>
+          <select id="scheduleDayOfWeek" class="form-input">
+            <option value="1">${getDayNames()[1]}</option><option value="2">${getDayNames()[2]}</option><option value="3">${getDayNames()[3]}</option>
+            <option value="4">${getDayNames()[4]}</option><option value="5">${getDayNames()[5]}</option><option value="6">${getDayNames()[6]}</option>
+            <option value="0">${getDayNames()[0]}</option>
+          </select>
+        </div>
+        <button class="btn-primary" style="width: 100%; padding: 10px; font-size: 13px;" onclick="setMyCollectionDay()">
+          📌 ${I18N.t('setCollectionDayBtn')}
+        </button>
+        <div id="collectionDayResult" style="margin-top: 10px; font-size: 12.5px; color: var(--text-muted);"></div>
+      </div>
+    </div>
+
     <!-- Bottom Full-Width Section: Authorized Recyclers (3-Column Desktop Grid) -->
     <div class="card" style="padding: 20px;">
       <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
         <div>
           <h3 class="card-title">${I18N.t('wholesaleCompareTitle')}</h3>
-          <p class="card-subtitle">Dispatch lots to authorized CPCB green recyclers with verified digital weighbridges & live dispatch tracking</p>
+          <p class="card-subtitle">${I18N.t('dispatchLotsSubtitle')}</p>
         </div>
         <span class="badge" style="background: #e0f2fe; color: #0369a1; font-weight: 700; padding: 6px 12px; font-size: 12px;">
           🟢 ${ESETU_DATA.recyclers.length} ${ESETU_DATA.recyclers.length === 1 ? I18N.t('recyclerSingular') : I18N.t('recyclerPlural')}
@@ -1581,7 +2436,7 @@ function renderKabadiwalaProfileTab(container, tabNavHtml) {
             ⚖️ ${I18N.t('certifiedScaleBadge')}
           </span>
           <div style="margin-top: 8px; display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap;">
-            <button class="audio-btn" onclick="I18N.speak('Profile for ${dealerName}, owner of ${yardName}. Total weekly collections: ${totalWeeklyKg} kilograms across ${totalItemsCount} transactions.')">
+            <button class="audio-btn" onclick="I18N.speak(I18N.tf('dealerProfileSpeech', { name: '${dealerName}', yard: '${yardName}', weight: '${totalWeeklyKg}', count: '${totalItemsCount}' }))">
               ${I18N.t('speakBtn')}
             </button>
             <button class="btn-secondary" style="font-size: 12px; padding: 6px 12px;" onclick="resendPriceListSms('${dealerId}', '${phone}')">
@@ -1643,13 +2498,13 @@ function renderKabadiwalaProfileTab(container, tabNavHtml) {
     <!-- 4. Material Category Breakdown for this Dealer -->
     <div class="card">
       <div class="card-header">
-        <h3 class="card-title">🔬 Weekly Collected Scrap Streams Breakdown</h3>
+        <h3 class="card-title">🔬 ${I18N.t('scrapStreamsBreakdownTitle')}</h3>
       </div>
       <div class="desktop-grid-2">
         <div style="display: flex; flex-direction: column; gap: 12px;">
           <div>
             <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:700;">
-              <span>🔌 Copper Wires & Cables</span>
+              <span>🔌 ${I18N.t('streamCopperWires')}</span>
               <span>38% (335 kg)</span>
             </div>
             <div style="background:#e2e8f0; height:8px; border-radius:4px; margin-top:4px;">
@@ -1658,7 +2513,7 @@ function renderKabadiwalaProfileTab(container, tabNavHtml) {
           </div>
           <div>
             <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:700;">
-              <span>💻 High-Grade PCBs & Telecom Boards</span>
+              <span>💻 ${I18N.t('streamHighGradePcbs')}</span>
               <span>28% (248 kg)</span>
             </div>
             <div style="background:#e2e8f0; height:8px; border-radius:4px; margin-top:4px;">
@@ -1667,7 +2522,7 @@ function renderKabadiwalaProfileTab(container, tabNavHtml) {
           </div>
           <div>
             <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:700;">
-              <span>🔋 Lithium-Ion & EV Batteries</span>
+              <span>🔋 ${I18N.t('streamLithiumBatteries')}</span>
               <span>15% (132 kg)</span>
             </div>
             <div style="background:#e2e8f0; height:8px; border-radius:4px; margin-top:4px;">
@@ -1676,7 +2531,7 @@ function renderKabadiwalaProfileTab(container, tabNavHtml) {
           </div>
           <div>
             <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:700;">
-              <span>📺 CRT & Display Glass</span>
+              <span>📺 ${I18N.t('streamCrtDisplayGlass')}</span>
               <span>19% (168 kg)</span>
             </div>
             <div style="background:#e2e8f0; height:8px; border-radius:4px; margin-top:4px;">
@@ -1686,12 +2541,12 @@ function renderKabadiwalaProfileTab(container, tabNavHtml) {
         </div>
 
         <div style="background: #f8fafc; border: 1.5px solid var(--border); padding: 16px; border-radius: var(--radius-sm); font-size: 13px; line-height: 1.6;">
-          <h4 style="font-weight: 800; color: var(--primary-dark); margin-bottom: 6px;">♻️ Formal Channel Advantage</h4>
-          <p>By routing <strong>${totalWeeklyKg} kg</strong> through authorized CPCB recyclers this week, <strong>${yardName}</strong> gained:</p>
+          <h4 style="font-weight: 800; color: var(--primary-dark); margin-bottom: 6px;">♻️ ${I18N.t('formalChannelAdvantageTitle')}</h4>
+          <p>${I18N.tf('formalChannelIntro', { weight: totalWeeklyKg, yard: yardName })}</p>
           <ul style="padding-left: 18px; margin-top: 6px; color: var(--text-muted);">
-            <li><strong>+₹38,400 higher earnings</strong> compared to local backyard burn pits.</li>
-            <li>Zero police or environmental pollution harassment.</li>
-            <li>100% documented CPCB Form-6 manifests for every lot dispatched.</li>
+            <li>${I18N.t('advantageHigherEarnings')}</li>
+            <li>${I18N.t('advantageZeroHarassment')}</li>
+            <li>${I18N.t('advantageDocumentedManifests')}</li>
           </ul>
         </div>
       </div>
@@ -1703,67 +2558,119 @@ function renderKabadiwalaProfileTab(container, tabNavHtml) {
   window.openCreateLotModal = (recyclerId, recyclerName) => {
     const modalEl = document.getElementById('lotModalContainer');
     const lotNo = `LOT-REC-2026-${Math.floor(1000 + Math.random() * 9000)}`;
+    const firstMat = ESETU_DATA.materials[0];
 
     modalEl.innerHTML = `
       <div class="modal-overlay">
         <div class="modal-content">
           <button class="modal-close" onclick="closeLotModal()">✕</button>
-          
+
           <h3 style="font-size: 18px; font-weight: 800; color: var(--primary-dark); margin-bottom: 4px;">
-            📄 Create Bulk Lot Manifest
+            📄 ${I18N.t('createLotManifestTitle')}
           </h3>
           <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">
-            Target Recycler: <strong>${recyclerName}</strong>
+            ${I18N.t('targetRecyclerLabel')} <strong>${recyclerName}</strong>
           </p>
 
           <div style="background: #f8fafc; padding: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border); font-size: 12.5px; margin-bottom: 14px;">
-            <div>Lot Reference: <strong>${lotNo}</strong></div>
-            <div>GPS Handover Coordinates: <strong>18.5074° N, 73.8077° E</strong></div>
-            <div>Timestamp: <strong>${new Date().toLocaleString()}</strong></div>
+            <div>${I18N.t('lotReferenceLabel')} <strong>${lotNo}</strong></div>
+            <div id="modalGpsLine">${I18N.t('gpsHandoverCoordsLabel')} <strong>📡 ${I18N.t('locatingGps')}</strong></div>
+            <div>${I18N.t('timestampLabel')} <strong>${new Date().toLocaleString()}</strong></div>
           </div>
 
           <div class="form-group">
-            <label class="form-label">Material Stream:</label>
-            <select id="modalMatSelect" class="form-input">
+            <label class="form-label">${I18N.t('materialStreamLabel')}</label>
+            <select id="modalMatSelect" class="form-input" onchange="onLotModalMaterialChange()">
               ${ESETU_DATA.materials.map(m => `
-                <option value="${m.id}">${m.icon} ${m.name} (₹${m.recyclerRate}/kg)</option>
+                <option value="${m.id}" data-rate="${m.recyclerRate}">${m.icon} ${m.name} (₹${m.recyclerRate}/kg)</option>
               `).join('')}
             </select>
           </div>
 
           <div class="form-group">
-            <label class="form-label">Net Lot Weight (kg):</label>
+            <label class="form-label">${I18N.t('netLotWeightLabel')}</label>
             <input type="number" id="modalWeightInput" class="form-input" value="100">
           </div>
 
           <div class="form-group">
-            <label class="form-label">Settlement Mode:</label>
+            <label class="form-label">${I18N.t('proposedRateLabel')} (₹/kg):</label>
+            <input type="number" id="modalRateInput" class="form-input" value="${firstMat.recyclerRate}" oninput="onLotModalRateChange()">
+            <div id="fairPriceBadge" style="margin-top: 6px;"></div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">${I18N.t('settlementModeLabel')}</label>
             <select id="modalPaySelect" class="form-input">
-              <option value="Cash at Gate">💵 Immediate Cash at Gate</option>
-              <option value="Same-day RTGS">🏦 Same-day Bank RTGS</option>
-              <option value="Instant UPI">📱 Instant UPI Transfer</option>
+              <option value="Cash at Gate">💵 ${I18N.t('payCashAtGateOpt')}</option>
+              <option value="Same-day RTGS">🏦 ${I18N.t('paySameDayRtgsOpt')}</option>
+              <option value="Instant UPI">📱 ${I18N.t('payInstantUpiOpt')}</option>
             </select>
           </div>
 
           <!-- Digital QR Handover Manifest -->
           <div style="background: #eff6ff; border: 1.5px dashed #3b82f6; padding: 16px; border-radius: var(--radius-sm); text-align: center; margin: 16px 0;">
             <div style="font-size: 13px; font-weight: 800; color: #1e40af; margin-bottom: 8px;">
-              📱 CPCB Form-6 Verifiable Digital QR Slip
+              📱 ${I18N.t('qrSlipTitle')}
             </div>
             <div style="background: #fff; width: 140px; height: 140px; margin: 0 auto; display: flex; align-items: center; justify-content: center; border: 2px solid #000; font-family: monospace; font-size: 11px; padding: 6px;">
               [QR: ${lotNo}]<br>
-              CPCB TRACEABLE
+              ${I18N.t('cpcbTraceableLabel')}
             </div>
             <p style="font-size: 11.5px; color: #1d4ed8; margin-top: 8px;">
-              The authorized recycler scans this tamper-proof code at their weighbridge to confirm handover.
+              ${I18N.t('qrSlipDesc')}
             </p>
           </div>
 
           <button class="btn-primary" onclick="confirmLotCreation('${lotNo}', '${recyclerId}', '${recyclerName}')">
-            ✅ Dispatch Lot to Recycler
+            ✅ ${I18N.t('dispatchLotBtn')}
           </button>
         </div>
       </div>
+    `;
+
+    AppState.lotModalGps = null;
+    getBrowserCoordinates().then((coords) => {
+      const gpsLine = document.getElementById('modalGpsLine');
+      if (!gpsLine) return; // modal already closed
+      if (coords) {
+        AppState.lotModalGps = coords;
+        gpsLine.innerHTML = `${I18N.t('gpsHandoverCoordsLabel')} <strong>${coords.latitude.toFixed(5)}° N, ${coords.longitude.toFixed(5)}° E</strong> ✅`;
+      } else {
+        gpsLine.innerHTML = `${I18N.t('gpsHandoverCoordsLabel')} <strong>${I18N.t('gpsUnavailableFallback')}</strong>`;
+      }
+    });
+
+    onLotModalRateChange();
+  };
+
+  window.onLotModalMaterialChange = () => {
+    const sel = document.getElementById('modalMatSelect');
+    const opt = sel.options[sel.selectedIndex];
+    const rate = Number(opt.dataset.rate);
+    document.getElementById('modalRateInput').value = rate;
+    onLotModalRateChange();
+  };
+
+  // Fair Price Detector — live badge as the kabadiwala edits the proposed rate.
+  window.onLotModalRateChange = () => {
+    const sel = document.getElementById('modalMatSelect');
+    const mat = ESETU_DATA.materials.find(m => m.id === sel.value) || ESETU_DATA.materials[0];
+    const proposedRate = Number(document.getElementById('modalRateInput').value) || 0;
+    const badgeEl = document.getElementById('fairPriceBadge');
+    if (!badgeEl) return;
+
+    const { status, deviationPct } = PriceUtils.evaluateFairPrice(proposedRate, mat.recyclerRate);
+    const styles = {
+      fair: { bg: '#dcfce7', color: '#166534', label: `✅ ${I18N.t('fairPriceFair')}` },
+      low: { bg: '#fee2e2', color: '#991b1b', label: `⚠️ ${I18N.t('fairPriceLow')} (${deviationPct}%)` },
+      high: { bg: '#fef3c7', color: '#92400e', label: `⚠️ ${I18N.t('fairPriceHigh')} (+${deviationPct}%)` }
+    }[status];
+
+    badgeEl.innerHTML = `
+      <span style="font-size: 11.5px; background: ${styles.bg}; color: ${styles.color}; padding: 3px 9px; border-radius: 4px; font-weight: 800;">
+        ${styles.label}
+      </span>
+      <span style="font-size: 11px; color: var(--text-muted); margin-left: 6px;">${I18N.t('benchmarkLabel')} ₹${mat.recyclerRate}/kg</span>
     `;
   };
 
@@ -1775,24 +2682,139 @@ function renderKabadiwalaProfileTab(container, tabNavHtml) {
     const matId = document.getElementById('modalMatSelect').value;
     const weight = Number(document.getElementById('modalWeightInput').value) || 50;
     const payMode = document.getElementById('modalPaySelect').value;
+    const proposedRate = Number(document.getElementById('modalRateInput').value) || 0;
+    const gps = AppState.lotModalGps;
 
     try {
       const newLot = await API.createLot({
         kabadiwalaId: AppState.user.phone,
         kabadiwalaName: AppState.user.name,
         recyclerId, recyclerName,
-        materialId: matId, weightKg: weight, paymentMethod: payMode
+        materialId: matId, weightKg: weight, paymentMethod: payMode,
+        agreedRate: proposedRate,
+        gpsLat: gps ? gps.latitude : undefined, gpsLng: gps ? gps.longitude : undefined
       });
 
       ESETU_DATA.lots.unshift(newLot);
       closeLotModal();
-      alert(`✅ Lot ${newLot.lotId} generated and transmitted to ${recyclerName}!`);
-      I18N.speak(`Lot generated and sent to ${recyclerName}.`);
+      alert(`✅ ${I18N.tf('lotGeneratedMsg', { lotId: newLot.lotId, name: recyclerName })}`);
+      I18N.speak(I18N.tf('lotSentSpeech', { name: recyclerName }));
       renderKabadiwalaPage(container);
     } catch (err) {
-      alert(`❌ Could not create lot: ${err.message}`);
+      alert(`❌ ${I18N.tf('couldNotCreateLotMsg', { error: err.message })}`);
     }
   };
+
+// Collection Route Optimizer — greedy nearest-neighbor ordering of this kabadiwala's
+// pending customer_bookings, starting from the kabadiwala's own registered location.
+window.optimizeMyRoute = async () => {
+  const resultEl = document.getElementById('routeOptimizerResult');
+  resultEl.innerHTML = `<div style="font-size:12px; color:var(--text-muted);">${I18N.t('loadingPendingPickups')}</div>`;
+
+  try {
+    const kabadiwalaId = ESETU_DATA.kabadiwalas.find(k => k.phone === AppState.user.phone)?.id || AppState.user.phone;
+    const bookings = await API.listBookings({ kabadiwalaId, status: 'Requested' });
+    const stopsWithCoords = bookings.filter(b => typeof b.gpsLat === 'number' && typeof b.gpsLng === 'number')
+      .map(b => ({ ...b, latitude: b.gpsLat, longitude: b.gpsLng }));
+
+    if (!stopsWithCoords.length) {
+      resultEl.innerHTML = `<div style="font-size:12.5px; color:var(--text-muted);">${I18N.t('noPendingPickups')}</div>`;
+      return;
+    }
+
+    const start = AppState.myCoords || { latitude: stopsWithCoords[0].latitude, longitude: stopsWithCoords[0].longitude };
+    const ordered = GeoUtils.nearestNeighborRoute(start, stopsWithCoords);
+
+    const listHtml = ordered.map((stop, idx) => `
+      <div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--border); font-size:12.5px;">
+        <span>${idx + 1}. ${stop.customerName || I18N.t('genericCustomerLabel')} — ${stop.materialName}</span>
+        <span style="color:var(--text-muted);">${stop.distanceFromPrevKm !== null ? `${stop.distanceFromPrevKm} km` : '—'}</span>
+      </div>
+    `).join('');
+
+    const waypoints = ordered.map(s => `${s.latitude},${s.longitude}`).join('|');
+    const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${ordered[ordered.length - 1].latitude},${ordered[ordered.length - 1].longitude}&waypoints=${encodeURIComponent(waypoints)}`;
+
+    resultEl.innerHTML = `
+      ${listHtml}
+      <a href="${mapsUrl}" target="_blank" class="btn-secondary" style="display:block; text-align:center; margin-top:10px; padding:8px; font-size:12.5px; text-decoration:none;">
+        🗺️ ${I18N.t('openMultiStopBtn')}
+      </a>
+    `;
+  } catch (err) {
+    resultEl.innerHTML = `<div style="color:var(--danger); font-size:12.5px;">❌ ${err.message}</div>`;
+  }
+};
+
+// Better Earnings (load pooling) — group this kabadiwala's completed-but-not-yet-pooled
+// customer bookings by material, so 2+ small pickups can be combined into one wholesale
+// lot at a small consolidation bonus instead of dispatching each individually.
+window.loadPoolableBookings = async () => {
+  const resultEl = document.getElementById('poolingResult');
+  resultEl.innerHTML = `<div style="font-size:12px; color:var(--text-muted);">${I18N.t('loadingLabel')}</div>`;
+
+  try {
+    const kabadiwalaId = ESETU_DATA.kabadiwalas.find(k => k.phone === AppState.user.phone)?.id || AppState.user.phone;
+    const bookings = await API.listBookings({ kabadiwalaId, status: 'Completed' });
+    const poolable = bookings.filter(b => !b.pooledLotId);
+
+    const groups = {};
+    poolable.forEach(b => { (groups[b.materialId] = groups[b.materialId] || []).push(b); });
+    const groupEntries = Object.entries(groups).filter(([, list]) => list.length >= 2);
+
+    if (!groupEntries.length) {
+      resultEl.innerHTML = `<div style="font-size:12.5px; color:var(--text-muted);">${I18N.t('noPoolableGroups')}</div>`;
+      return;
+    }
+
+    resultEl.innerHTML = groupEntries.map(([materialId, list]) => {
+      const totalWeight = list.reduce((s, b) => s + b.weightKg, 0);
+      return `
+        <div style="background:#f8fafc; border:1px solid var(--border); border-radius:6px; padding:8px 10px; margin-bottom:6px; font-size:12px; display:flex; justify-content:space-between; align-items:center; gap:8px;">
+          <span>${list[0].materialName} — ${list.length} ${I18N.t('pickupsUnit')} (${totalWeight.toFixed(2)} kg)</span>
+          <button class="btn-primary" style="padding:5px 10px; font-size:11.5px; width:auto;" onclick='poolTheseRequests(${JSON.stringify(list.map(b => b.id))})'>
+            ${I18N.t('poolBtn')}
+          </button>
+        </div>
+      `;
+    }).join('');
+  } catch (err) {
+    resultEl.innerHTML = `<div style="color:var(--danger); font-size:12px;">❌ ${err.message}</div>`;
+  }
+};
+
+window.poolTheseRequests = async (bookingIds) => {
+  const recycler = ESETU_DATA.recyclers[0];
+  if (!recycler) return alert(I18N.t('noRecyclersToDispatchAlert'));
+  try {
+    const kabadiwalaId = ESETU_DATA.kabadiwalas.find(k => k.phone === AppState.user.phone)?.id || AppState.user.phone;
+    const lot = await API.poolBookingsIntoLot({
+      bookingIds, kabadiwalaId, kabadiwalaName: AppState.user.name,
+      recyclerId: recycler.id, recyclerName: recycler.name, paymentMethod: 'Cash at Gate'
+    });
+    alert(`✅ ${I18N.tf('pooledSuccessMsg', { lotId: lot.lotId, weight: lot.weightKg.toFixed(2), rate: lot.agreedRate.toFixed(0) })}`);
+    loadPoolableBookings();
+  } catch (err) {
+    alert(`❌ ${I18N.tf('couldNotPoolMsg', { error: err.message })}`);
+  }
+};
+
+// Smart Collection Day
+window.setMyCollectionDay = async () => {
+  const pincode = document.getElementById('scheduleAreaPincode').value.trim();
+  const dayOfWeek = Number(document.getElementById('scheduleDayOfWeek').value);
+  const resultEl = document.getElementById('collectionDayResult');
+  if (!pincode) { resultEl.textContent = I18N.t('enterPincodeFirstAlert'); return; }
+
+  try {
+    const kabadiwalaId = ESETU_DATA.kabadiwalas.find(k => k.phone === AppState.user.phone)?.id || AppState.user.phone;
+    await API.createCollectionSchedule({ kabadiwalaId, kabadiwalaName: AppState.user.name, areaPincode: pincode, dayOfWeek });
+    const dayNames = getDayNames();
+    resultEl.innerHTML = `<span style="color:var(--success); font-weight:700;">✅ ${I18N.tf('collectionDaySetMsg', { day: dayNames[dayOfWeek], pincode })}</span>`;
+  } catch (err) {
+    resultEl.innerHTML = `<span style="color:var(--danger);">❌ ${err.message}</span>`;
+  }
+};
 
 // -------------------------------------------------------------
 // STEP 4: RECYCLER PORTAL (CPCB EPR COMPLIANCE & RATES)
@@ -1802,6 +2824,18 @@ function renderRecyclerPage(container) {
     const isPaid = lot.paymentStatus === 'Paid';
     const isVerified = lot.eprCertIssued;
 
+    // Transparent Pricing / Fraud-Free Payments: compare the rate this lot was locked at
+    // against the material's CURRENT benchmark rate (which may have moved since the lot
+    // was created) — reuses the same PriceUtils.evaluateFairPrice used by the Fair Price
+    // Detector in the Create Lot modal.
+    const benchmarkMat = ESETU_DATA.materials.find(m => m.symbol === lot.symbol);
+    const fairCheck = benchmarkMat ? PriceUtils.evaluateFairPrice(lot.agreedRate, benchmarkMat.recyclerRate) : null;
+    const fraudBadge = (fairCheck && fairCheck.status !== 'fair') ? `
+      <span style="font-size: 10.5px; background: #fee2e2; color: #991b1b; padding: 2px 7px; border-radius: 4px; font-weight: 800; margin-left: 6px;">
+        ⚠️ ${I18N.t('rateFlaggedBadge')} (${fairCheck.deviationPct}%)
+      </span>
+    ` : '';
+
     return `
       <div class="card" style="border-left: 5px solid ${isPaid ? 'var(--success)' : 'var(--accent)'}; margin-bottom: 14px;">
         <div style="display: flex; justify-content: space-between; align-items: flex-start;">
@@ -1809,9 +2843,9 @@ function renderRecyclerPage(container) {
             <span style="font-size: 11.5px; background: #e0e7ff; color: #3730a3; padding: 3px 8px; border-radius: 4px; font-weight: 800;">
               ${lot.lotId}
             </span>
-            <h4 style="font-size: 15px; font-weight: 800; margin-top: 5px;">${lot.material}</h4>
+            <h4 style="font-size: 15px; font-weight: 800; margin-top: 5px;">${lot.material}${fraudBadge}</h4>
             <div style="font-size: 12.5px; color: var(--text-muted);">
-              Collector: <strong>${lot.kabadiwalaName}</strong> (${lot.date})
+              ${I18N.t('collectorLabel')} <strong>${lot.kabadiwalaName}</strong> (${lot.date})
             </div>
           </div>
           <div style="text-align: right;">
@@ -1825,10 +2859,10 @@ function renderRecyclerPage(container) {
         </div>
 
         <div style="background: #f8fafc; padding: 10px 12px; border-radius: var(--radius-sm); margin: 10px 0; font-size: 12px;">
-          <div>Net Weight: <strong>${lot.weightKg} kg</strong> @ ₹${lot.agreedRate}/kg</div>
-          <div>Settlement: <strong>${lot.paymentMethod}</strong></div>
-          <div>GPS Origin: <strong>${lot.gpsLocation}</strong></div>
-          <div>CPCB Form-6 Manifest: <strong>${lot.cpcbManifestNo}</strong></div>
+          <div>${I18N.t('netWeightLabel')} <strong>${lot.weightKg} kg</strong> @ ₹${lot.agreedRate}/kg${benchmarkMat ? ` <span style="color:var(--text-muted); font-weight:normal;">(${I18N.t('benchmarkLabel')} ₹${benchmarkMat.recyclerRate}/kg)</span>` : ''}</div>
+          <div>${I18N.t('settlementLabel')} <strong>${lot.paymentMethod}</strong></div>
+          <div>${I18N.t('gpsOriginLabel')} <strong>${lot.gpsLocation}</strong></div>
+          <div>${I18N.t('cpcbManifestLabel')} <strong>${lot.cpcbManifestNo}</strong></div>
         </div>
 
         <div style="display: flex; gap: 10px; margin-top: 12px;">
@@ -1839,11 +2873,11 @@ function renderRecyclerPage(container) {
           ` : ''}
 
           <button class="btn-secondary" style="flex:1; padding: 10px; font-size: 13px;" onclick="viewEprCertificate('${lot.lotId}')">
-            ${isVerified ? '📜 View CPCB EPR Certificate' : I18N.t('issueCertBtn')}
+            ${isVerified ? '📜 ' + I18N.t('viewCertBtn') : I18N.t('issueCertBtn')}
           </button>
 
           <button class="btn-secondary" style="flex:1; padding: 10px; font-size: 13px;" onclick="openConnectChatModal('${lot.kabadiwalaId}', '${lot.kabadiwalaName}', '${lot.recyclerId}', '${lot.recyclerName}', 'recycler', '${AppState.user.name}')">
-            💬 Connect
+            💬 ${I18N.t('connectBtnShort')}
           </button>
         </div>
       </div>
@@ -1868,7 +2902,7 @@ function renderRecyclerPage(container) {
             </div>
           </div>
         </div>
-        <button class="audio-btn" onclick="I18N.speak('Authorized Recycler Compliance Portal. CPCB Authorized Facility.')">
+        <button class="audio-btn" onclick="I18N.speak(I18N.t('recyclerPortalSpeech'))">
           ${I18N.t('speakBtn')}
         </button>
       </div>
@@ -1925,6 +2959,9 @@ function renderRecyclerPage(container) {
                   <button class="btn-secondary" style="padding: 4px 10px; font-size: 12px;" onclick="promptRateUpdate('${m.id}')">
                     ${I18N.t('editRateBtn')}
                   </button>
+                  <button class="btn-secondary" style="padding: 4px 10px; font-size: 12px; border-color:#a855f7; color:#7e22ce;" onclick="promptOwnRateUpdate('${m.id}')" title="${I18N.t('ownRateHint')}">
+                    🏆 ${I18N.t('setOwnRateBtn')}
+                  </button>
                 </div>
               </div>
             `).join('')}
@@ -1947,30 +2984,68 @@ function renderRecyclerPage(container) {
 
   // Window helpers for recycler actions
   window.confirmRecyclerPayment = async (lotId) => {
+    // Fraud/Underpayment Alert — block a silent confirm if the locked lot rate has drifted
+    // from the material's current benchmark rate beyond the tolerance band; require an
+    // explicit acknowledgement before proceeding (the check itself never blocks a fair lot).
+    const lot = ESETU_DATA.lots.find(l => l.lotId === lotId);
+    const benchmarkMat = lot && ESETU_DATA.materials.find(m => m.symbol === lot.symbol);
+    if (lot && benchmarkMat) {
+      const { status, deviationPct } = PriceUtils.evaluateFairPrice(lot.agreedRate, benchmarkMat.recyclerRate);
+      if (status !== 'fair') {
+        const direction = status === 'low' ? 'BELOW' : 'ABOVE';
+        const proceed = confirm(
+          `⚠️ Fraud/Underpayment Alert\n\nThis lot was locked at ₹${lot.agreedRate}/kg, which is ${Math.abs(deviationPct)}% ${direction} the current benchmark rate of ₹${benchmarkMat.recyclerRate}/kg.\n\nConfirm you have reviewed this and still want to proceed with payment?`
+        );
+        if (!proceed) return;
+      }
+    }
+
     try {
       const updated = await API.confirmLotPayment(lotId);
       const idx = ESETU_DATA.lots.findIndex(l => l.lotId === lotId);
       if (idx !== -1) ESETU_DATA.lots[idx] = updated;
-      alert(`✅ Lot ${lotId} approved. ₹${updated.totalAmount.toLocaleString('en-IN')} paid and CPCB Form-6 certificate generated!`);
-      I18N.speak(`Payment confirmed for Lot ${lotId}. Certificate issued.`);
+      alert(`✅ ${I18N.tf('paymentApprovedMsg', { lotId, amount: updated.totalAmount.toLocaleString('en-IN') })}`);
+      I18N.speak(I18N.tf('paymentConfirmedSpeech', { lotId }));
       renderRecyclerPage(container);
     } catch (err) {
-      alert(`❌ Could not confirm payment: ${err.message}`);
+      alert(`❌ ${I18N.tf('couldNotConfirmPaymentMsg', { error: err.message })}`);
+    }
+  };
+
+  // Best Buyer Finder — a recycler publishing their own rate for one material, which then
+  // competes for the "🏆 Best Payer" badge on the kabadiwala's Warehouse & Recyclers tab.
+  window.promptOwnRateUpdate = async (matId) => {
+    const mat = ESETU_DATA.materials.find(m => m.id === matId);
+    const myRecord = ESETU_DATA.recyclers.find(r => r.cpcbRegNo === AppState.user.govRegNo);
+    if (!mat || !myRecord) { alert(I18N.t('couldNotFindRecyclerRecordAlert')); return; }
+
+    const current = (myRecord.rates && myRecord.rates[mat.symbol]) || mat.recyclerRate;
+    const newRate = prompt(I18N.tf('publishOwnRatePrompt', { name: mat.name }), current);
+    if (newRate && !isNaN(newRate)) {
+      try {
+        await API.updateRecyclerOwnRate(myRecord.id, matId, Number(newRate));
+        const fresh = await API.bootstrap();
+        Object.assign(ESETU_DATA, fresh);
+        alert(`✅ ${I18N.tf('ratePublishedMsg', { symbol: mat.symbol, rate: newRate })}`);
+        renderRecyclerPage(container);
+      } catch (err) {
+        alert(`❌ ${I18N.tf('couldNotPublishRateMsg', { error: err.message })}`);
+      }
     }
   };
 
   window.promptRateUpdate = async (matId) => {
     const mat = ESETU_DATA.materials.find(m => m.id === matId);
     if (!mat) return;
-    const newRate = prompt(`Enter new buying rate per kg for ${mat.name}:`, mat.recyclerRate);
+    const newRate = prompt(I18N.tf('enterNewRatePrompt', { name: mat.name }), mat.recyclerRate);
     if (newRate && !isNaN(newRate)) {
       try {
         const updated = await API.updateMaterialRate(matId, { recyclerRate: Number(newRate) });
         Object.assign(mat, updated);
-        alert(`✅ Updated: ${mat.symbol} rate is now ₹${newRate}/kg.`);
+        alert(`✅ ${I18N.tf('rateUpdatedMsg', { symbol: mat.symbol, rate: newRate })}`);
         renderRecyclerPage(container);
       } catch (err) {
-        alert(`❌ Could not update rate: ${err.message}`);
+        alert(`❌ ${I18N.tf('couldNotUpdateRateMsg', { error: err.message })}`);
       }
     }
   };
@@ -1978,9 +3053,9 @@ function renderRecyclerPage(container) {
   window.triggerDailyPriceBroadcast = async () => {
     try {
       const result = await API.triggerDailyPriceListBroadcast();
-      alert(`📩 Price list SMS sent to ${result.sentCount} of ${result.total} registered dealers.`);
+      alert(`📩 ${I18N.tf('priceSmsBroadcastMsg', { sent: result.sentCount, total: result.total })}`);
     } catch (err) {
-      alert(`❌ Broadcast failed: ${err.message}`);
+      alert(`❌ ${I18N.tf('broadcastFailedMsg', { error: err.message })}`);
     }
   };
 
@@ -2002,28 +3077,28 @@ function renderRecyclerPage(container) {
           <div style="text-align: center; margin-bottom: 14px;">
             <div style="font-size: 36px;">📜</div>
             <h3 style="font-size: 17px; font-weight: 900; color: #14532d;">
-              GOVERNMENT OF INDIA • CPCB EPR CERTIFICATE
+              ${I18N.t('govOfIndiaCertTitle')}
             </h3>
             <div style="font-size: 11.5px; color: var(--text-muted);">
-              Under E-Waste (Management) Rules, 2022 • Form-6 Compliance Manifest
+              ${I18N.t('eWasteRulesSubtitle')}
             </div>
           </div>
 
           <div style="background: #f8fafc; border: 1.5px solid var(--border); padding: 14px; border-radius: var(--radius-sm); font-size: 13px; line-height: 1.6;">
-            <div><strong>Certificate ID:</strong> CPCB-EPR-CERT-${lot.lotId}</div>
-            <div><strong>Authorized Recycler:</strong> ${AppState.user.name}</div>
-            <div><strong>CPCB Reg No:</strong> ${AppState.user.govRegNo || '—'}</div>
-            <div><strong>Source Collector:</strong> ${lot.kabadiwalaName}</div>
-            <div><strong>Material Stream:</strong> ${lot.material}</div>
-            <div><strong>Net Verified Weight:</strong> ${lot.weightKg} kg</div>
-            <div><strong>GPS Geotag:</strong> ${lot.gpsLocation}</div>
-            <div><strong>Date & Timestamp:</strong> ${lot.date}</div>
-            <div><strong>Audit Status:</strong> <span style="color: #16a34a; font-weight: 800;">VERIFIED & PAID</span></div>
+            <div><strong>${I18N.t('certificateIdLabel')}</strong> CPCB-EPR-CERT-${lot.lotId}</div>
+            <div><strong>${I18N.t('authorizedRecyclerLabel')}</strong> ${AppState.user.name}</div>
+            <div><strong>${I18N.t('cpcbRegNoLabel')}</strong> ${AppState.user.govRegNo || '—'}</div>
+            <div><strong>${I18N.t('sourceCollectorLabel')}</strong> ${lot.kabadiwalaName}</div>
+            <div><strong>${I18N.t('materialStreamLabel')}</strong> ${lot.material}</div>
+            <div><strong>${I18N.t('netVerifiedWeightLabel')}</strong> ${lot.weightKg} kg</div>
+            <div><strong>${I18N.t('gpsGeotagLabel')}</strong> ${lot.gpsLocation}</div>
+            <div><strong>${I18N.t('dateTimestampLabel')}</strong> ${lot.date}</div>
+            <div><strong>${I18N.t('auditStatusLabel')}</strong> <span style="color: #16a34a; font-weight: 800;">${I18N.t('verifiedAndPaidStatus')}</span></div>
           </div>
 
           <div style="margin-top: 16px; text-align: center;">
-            <button class="btn-primary" onclick="alert('🖨️ Official CPCB Certificate PDF Generated & Downloaded!'); document.getElementById('certModalContainer').innerHTML='';">
-              🖨️ Download Official CPCB PDF
+            <button class="btn-primary" onclick="alert(I18N.t('certPdfGeneratedAlert')); document.getElementById('certModalContainer').innerHTML='';">
+              🖨️ ${I18N.t('downloadCertPdfBtn')}
             </button>
           </div>
         </div>
@@ -2031,6 +3106,77 @@ function renderRecyclerPage(container) {
     `;
   };
 }
+
+// -------------------------------------------------------------
+// E-WASTE HOTSPOT MAP (Leaflet + OpenStreetMap tiles via CDN)
+// -------------------------------------------------------------
+let hotspotLeafletMap = null;
+
+window.openHotspotMap = () => {
+  let modalContainer = document.getElementById('hotspotMapOverlay');
+  if (!modalContainer) {
+    modalContainer = document.createElement('div');
+    modalContainer.id = 'hotspotMapOverlay';
+    document.body.appendChild(modalContainer);
+  }
+
+  modalContainer.innerHTML = `
+    <div class="modal-overlay">
+      <div class="modal-content" style="max-width: 700px;">
+        <button class="modal-close" onclick="closeHotspotMap()">✕</button>
+        <h3 style="font-size: 17px; font-weight: 800; color: var(--primary-dark); margin-bottom: 4px;">
+          🗺️ ${I18N.t('hotspotMapTitle')}
+        </h3>
+        <p style="font-size: 11.5px; color: var(--text-muted); margin-bottom: 10px;">⚠️ ${I18N.t('hotspotMapOfflineNotice')}</p>
+        <div id="hotspotMapDiv" style="width: 100%; height: 380px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: #e2e8f0;"></div>
+      </div>
+    </div>
+  `;
+
+  if (typeof L === 'undefined') {
+    document.getElementById('hotspotMapDiv').innerHTML = `
+      <div style="display:flex; align-items:center; justify-content:center; height:100%; text-align:center; padding:20px; color:var(--text-muted); font-size:13px;">
+        📴 ${I18N.t('mapTilesUnavailable')}
+      </div>
+    `;
+    return;
+  }
+
+  // Collect every coordinate the platform actually has: dealers, recyclers, and completed
+  // pickups/lots — real registered/transaction data, not decorative placeholder pins.
+  const points = [];
+  ESETU_DATA.kabadiwalas.forEach(k => { if (typeof k.latitude === 'number') points.push({ lat: k.latitude, lng: k.longitude, label: `🚲 ${k.name} (${I18N.t('dealerMapLabel')})`, color: '#16a34a' }); });
+  ESETU_DATA.recyclers.forEach(r => { if (typeof r.latitude === 'number') points.push({ lat: r.latitude, lng: r.longitude, label: `🏭 ${r.name} (${I18N.t('recyclerMapLabel')})`, color: '#2563eb' }); });
+  ESETU_DATA.lots.forEach(l => { if (typeof l.gpsLat === 'number') points.push({ lat: l.gpsLat, lng: l.gpsLng, label: `📦 ${I18N.t('lotMapLabel')} ${l.lotId}`, color: '#a855f7' }); });
+
+  const center = points.length
+    ? [points.reduce((s, p) => s + p.lat, 0) / points.length, points.reduce((s, p) => s + p.lng, 0) / points.length]
+    : [20.5937, 78.9629]; // India center fallback when no real coordinates exist yet
+
+  setTimeout(() => {
+    if (hotspotLeafletMap) { hotspotLeafletMap.remove(); hotspotLeafletMap = null; }
+    hotspotLeafletMap = L.map('hotspotMapDiv').setView(center, points.length ? 11 : 5);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors', maxZoom: 18
+    }).addTo(hotspotLeafletMap);
+
+    // Simple density coloring: a point near others gets a bigger, more opaque marker —
+    // a lightweight stand-in for a full heatmap without adding a second CDN dependency.
+    points.forEach((p) => {
+      const nearbyCount = points.filter(o => GeoUtils.haversineKm(p.lat, p.lng, o.lat, o.lng) < 3).length;
+      L.circleMarker([p.lat, p.lng], {
+        radius: 6 + Math.min(nearbyCount, 5) * 2,
+        color: p.color, fillColor: p.color, fillOpacity: 0.5, weight: 2
+      }).addTo(hotspotLeafletMap).bindPopup(p.label);
+    });
+  }, 50); // let the modal DOM node exist before Leaflet measures its container
+};
+
+window.closeHotspotMap = () => {
+  if (hotspotLeafletMap) { hotspotLeafletMap.remove(); hotspotLeafletMap = null; }
+  const el = document.getElementById('hotspotMapOverlay');
+  if (el) el.innerHTML = '';
+};
 
 // -------------------------------------------------------------
 // SAFETY & HAZARD GUIDANCE MODAL
@@ -2044,8 +3190,11 @@ window.openSafetyModal = () => {
   }
 
   const cardsHtml = ESETU_DATA.safetyGuides.map(guide => {
-    const title = I18N.currentLang === 'en' ? guide.title : (I18N.currentLang === 'mr' ? guide.titleMr : guide.titleHi);
-    const audioScript = I18N.currentLang === 'en' ? guide.audioScriptEn : (I18N.currentLang === 'mr' ? guide.audioScriptMr : guide.audioScriptHi);
+    const title = localizedField(guide, 'title');
+    const audioScript = localizedField(guide, 'audioScript');
+    const hazard = localizedField(guide, 'hazard');
+    const healthRisk = localizedField(guide, 'healthRisk');
+    const safeMethod = localizedField(guide, 'safeMethod');
 
     return `
       <div style="border-left: 5px solid ${guide.color}; background: #f8fafc; padding: 14px; border-radius: var(--radius-sm); margin-bottom: 14px;">
@@ -2058,9 +3207,9 @@ window.openSafetyModal = () => {
           </button>
         </div>
         <div style="font-size: 12.5px; margin-top: 8px;">
-          <p style="color: #991b1b; font-weight: 800;">⚠️ Hazard: ${guide.hazard}</p>
-          <p style="color: var(--text-muted); margin-top: 3px;">${guide.healthRisk}</p>
-          <p style="color: #166534; font-weight: 700; margin-top: 6px;">✅ Compliant Practice: ${guide.safeMethod}</p>
+          <p style="color: #991b1b; font-weight: 800;">⚠️ ${I18N.t('hazardLabel')} ${hazard}</p>
+          <p style="color: var(--text-muted); margin-top: 3px;">${healthRisk}</p>
+          <p style="color: #166534; font-weight: 700; margin-top: 6px;">✅ ${I18N.t('compliantPracticeLabel')} ${safeMethod}</p>
         </div>
       </div>
     `;
@@ -2107,7 +3256,7 @@ async function refreshConnectChatMessages() {
           <div>${m.body.replace(/</g, '&lt;')}</div>
         </div>
       `;
-    }).join('') : `<div style="text-align:center; color: var(--text-muted); font-size: 12.5px; padding: 20px;">No messages yet. Say hello 👋</div>`;
+    }).join('') : `<div style="text-align:center; color: var(--text-muted); font-size: 12.5px; padding: 20px;">${I18N.t('noMessagesYet')} 👋</div>`;
     listEl.scrollTop = listEl.scrollHeight;
   } catch (err) {
     // Silent — keep last known state, next poll tick will retry.
@@ -2130,11 +3279,11 @@ window.openConnectChatModal = async (kabadiwalaId, kabadiwalaName, recyclerId, r
       <div class="modal-content" style="max-width: 480px; display: flex; flex-direction: column; max-height: 80vh;">
         <button class="modal-close" onclick="closeConnectChatModal()">✕</button>
         <h3 style="font-size: 17px; font-weight: 800; margin-bottom: 4px;">💬 ${otherPartyName}</h3>
-        <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">Direct In-App Connect</p>
+        <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">${I18N.t('directConnectLabel')}</p>
         <div id="connectChatMessages" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 8px; background: #f8fafc; border-radius: var(--radius-sm); min-height: 200px; max-height: 320px;"></div>
         <div style="display: flex; gap: 8px; margin-top: 10px;">
-          <input type="text" id="connectChatInput" class="form-input" placeholder="Type a message..." style="flex: 1;" onkeydown="if(event.key==='Enter') sendConnectChatMessage('${(myName || '').replace(/'/g, "\\'")}')">
-          <button class="btn-primary" style="width: auto; padding: 10px 16px;" onclick="sendConnectChatMessage('${(myName || '').replace(/'/g, "\\'")}')">Send</button>
+          <input type="text" id="connectChatInput" class="form-input" placeholder="${I18N.t('typeMessagePlaceholder')}" style="flex: 1;" onkeydown="if(event.key==='Enter') sendConnectChatMessage('${(myName || '').replace(/'/g, "\\'")}')">
+          <button class="btn-primary" style="width: auto; padding: 10px 16px;" onclick="sendConnectChatMessage('${(myName || '').replace(/'/g, "\\'")}')">${I18N.t('sendBtn')}</button>
         </div>
       </div>
     </div>
@@ -2171,7 +3320,7 @@ window.sendConnectChatMessage = async (myName) => {
     });
     await refreshConnectChatMessages();
   } catch (err) {
-    alert(`❌ Could not send message: ${err.message}`);
+    alert(`❌ ${I18N.tf('couldNotSendMessageMsg', { error: err.message })}`);
   }
 };
 
@@ -2180,12 +3329,12 @@ window.resendPriceListSms = async (kabadiId, phone) => {
   try {
     const result = await API.sendPriceListSms(kabadiId);
     if (result.sent) {
-      alert(`📩 Today's scrap price list SMS sent to ${phone}.`);
+      alert(`📩 ${I18N.tf('priceSmsSentToMsg', { phone })}`);
     } else {
-      alert(`⚠️ SMS not sent: ${result.reason}`);
+      alert(`⚠️ ${I18N.tf('smsNotSentMsg', { reason: result.reason })}`);
     }
   } catch (err) {
-    alert(`❌ Could not send SMS: ${err.message}`);
+    alert(`❌ ${I18N.tf('couldNotSendSmsMsg', { error: err.message })}`);
   }
 };
 
@@ -2200,8 +3349,18 @@ function getLocalizedMatName(mat) {
   return mat.name;
 }
 
+// Generic per-language field picker for any object following the mat.name/nameHi/nameTa...
+// naming convention (safety guides: title/titleHi/titleTa, hazard/hazardHi/hazardTa, etc.).
+// Falls back to the English base field — never to a different language — when a
+// language-specific value is missing.
+function localizedField(obj, base) {
+  const suffixByLang = { hi: 'Hi', mr: 'Mr', ta: 'Ta', te: 'Te', kn: 'Kn', ml: 'Ml' };
+  const suffix = suffixByLang[I18N.currentLang];
+  return (suffix && obj[base + suffix]) || obj[base];
+}
+
 window.logoutUser = () => {
-  if (confirm(I18N.currentLang === 'en' ? 'Are you sure you want to log out?' : 'तुम्हाला खरोखर लॉग आउट करायचे आहे का?')) {
+  if (confirm(I18N.t('confirmLogoutMsg'))) {
     AppState.user = null;
     localStorage.removeItem('esetu_user');
     renderApp();

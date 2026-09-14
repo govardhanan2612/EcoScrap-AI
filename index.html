@@ -6,6 +6,11 @@
   <title>EcoScrap AI – Smart E-Waste Collection & Recycling Platform</title>
   <meta name="description" content="EcoScrap AI: Smart E-Waste Collection & Recycling Platform connecting informal scrap dealers and waste collectors to authorized EPR recyclers in India.">
   <link rel="stylesheet" href="css/style.css">
+  <!-- E-Waste Hotspot Map: Leaflet + OpenStreetMap tiles — the only no-API-key mapping
+       option available; tile images require live internet even though the rest of the
+       app shell works offline (see js/app.js openHotspotMap for the disclosed fallback). -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>♻️</text></svg>">
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#15803d">
@@ -66,11 +71,17 @@
     <!-- Website Footer -->
     <footer class="web-footer">
       <div>
-        <strong>EcoScrap AI</strong> • Central Pollution Control Board (CPCB) & EPR E-Waste Rules 2022 Compliant Architecture.
+        <strong>EcoScrap AI</strong> • <span id="footerComplianceText">Central Pollution Control Board (CPCB) & EPR E-Waste Rules 2022 Compliant Architecture.</span>
       </div>
-      <div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="audio-btn" style="background:#1e293b; color:#a855f7; border:1px solid #334155;" onclick="openVoiceAssistantModal()">
+          🎙️ <span id="footerAskBtnLabel">Ask EcoScrap AI</span>
+        </button>
+        <button class="audio-btn" style="background:#1e293b; color:#22c55e; border:1px solid #334155;" onclick="openHotspotMap()">
+          <span id="footerHotspotBtnLabel">🗺️ Hotspot Map</span>
+        </button>
         <button class="audio-btn" style="background:#1e293b; color:#38bdf8; border:1px solid #334155;" onclick="openSafetyModal()">
-          🚨 Safety & Hazard Guide
+          🚨 <span id="footerSafetyBtnLabel">Safety & Hazard Guide</span>
         </button>
       </div>
     </footer>
@@ -80,6 +91,8 @@
   <!-- Core Scripts -->
   <script src="js/api.js"></script>
   <script src="js/i18n.js"></script>
+  <script src="js/priceUtils.js"></script>
+  <script src="js/geoUtils.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

@@ -27,9 +27,35 @@ const API = {
     return this._send('GET', `/api/lots${qs}`);
   },
   createLot(payload) { return this._send('POST', '/api/lots', payload); },
+  poolBookingsIntoLot(payload) { return this._send('POST', '/api/lots/pool', payload); },
   confirmLotPayment(lotId) { return this._send('PATCH', `/api/lots/${encodeURIComponent(lotId)}/confirm-payment`); },
 
   updateMaterialRate(materialId, payload) { return this._send('PATCH', `/api/materials/${encodeURIComponent(materialId)}/rate`, payload); },
+  updateRecyclerOwnRate(recyclerId, materialId, rate) { return this._send('PATCH', `/api/recyclers/${encodeURIComponent(recyclerId)}/materials/${encodeURIComponent(materialId)}/rate`, { rate }); },
+  getMaterialHistory(materialId) { return this._send('GET', `/api/materials/${encodeURIComponent(materialId)}/history`); },
+
+  createBooking(payload) { return this._send('POST', '/api/bookings', payload); },
+  completeBooking(bookingId) { return this._send('PATCH', `/api/bookings/${encodeURIComponent(bookingId)}/complete`); },
+  listBookings(params) {
+    const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+    return this._send('GET', `/api/bookings${qs}`);
+  },
+  getCustomerSummary(phone) { return this._send('GET', `/api/customers/${encodeURIComponent(phone)}/summary`); },
+
+  createCollectionSchedule(payload) { return this._send('POST', '/api/collection-schedules', payload); },
+  listCollectionSchedules(params) {
+    const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+    return this._send('GET', `/api/collection-schedules${qs}`);
+  },
+
+  listInstitutions() { return this._send('GET', '/api/institutions'); },
+  createInstitution(payload) { return this._send('POST', '/api/institutions', payload); },
+  linkInstitutionDealer(id, payload) { return this._send('PATCH', `/api/institutions/${encodeURIComponent(id)}/link-dealer`, payload); },
+
+  listContracts(customerId) { return this._send('GET', `/api/contracts?${new URLSearchParams({ customerId }).toString()}`); },
+  createContract(payload) { return this._send('POST', '/api/contracts', payload); },
+  renewContract(id) { return this._send('PATCH', `/api/contracts/${encodeURIComponent(id)}/renew`); },
+  switchContract(id, payload) { return this._send('PATCH', `/api/contracts/${encodeURIComponent(id)}/switch`, payload); },
 
   sendPriceListSms(kabadiId) { return this._send('POST', `/api/kabadiwalas/${encodeURIComponent(kabadiId)}/send-price-sms`); },
   triggerDailyPriceListBroadcast() { return this._send('POST', '/api/notifications/send-daily-price-list'); },

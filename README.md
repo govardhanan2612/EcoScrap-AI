@@ -24,14 +24,31 @@ npm start
 
 Data (materials & rates, registered kabadiwalas/recyclers, lots/transactions, safety guides) lives in `data/esetu.db` and survives server restarts. The database is seeded once from `server/seed-data.js` the first time it's created.
 
-## 🔑 Demo Credentials
+## 🔑 Demo Access
 
-| Role | Credential | PIN |
-|------|-----------|-----|
-| Customer | Any name & phone | – |
-| Kabadiwala (Raju Shinde) | `9820144521` | `4452` |
-| Kabadiwala (Mohammed Bhai) | `9763218990` | `1899` |
-| Recycler (MahaGreen) | `CPCB/EPR-REC/2023/MH-0842` | `8420` |
+No fake accounts are pre-seeded — dealers and recyclers only exist once someone registers
+through the app, so there is no fixed demo PIN to share.
+
+| Role | How to access |
+|------|-----------|
+| Customer | Any name & phone — no registration needed |
+| Kabadiwala (Scrap Dealer) | Use "New Dealer Registration" (auto-assigns a PIN of `1234`), or sign in with a phone/PIN from a dealer already registered on this instance |
+| Recycler | Enter any CPCB/SPCB-format registration number (e.g. `CPCB/EPR-REC/2023/MH-0842`) — first use registers it for real; entering it again signs back in |
+
+## ✨ Innovation Features (built to match the pitch deck)
+
+All 28 features pitched across the 8 innovation categories are real and working — not
+static mocks. Notably:
+- **AI Scrap Scanner & Quality Checker** — deterministic, fully offline photo classification (`js/priceUtils.js`)
+- **Fair Price Detector / Fraud-Free Payments** — flags offers that drift from the benchmark rate
+- **Smart Weighing** — an honestly-labeled Bluetooth-scale *simulation* (no real hardware exists to integrate)
+- **Digital Scrap Passport & Verified Handover** — real GPS + photo captured at pickup, persisted per booking
+- **Voice Selling & AI Voice Assistant** — Web Speech API input/output, answers composed from live platform data
+- **Offline Mode** — cached price snapshot + a real queued-write sync for bookings
+- **Smart Recycler Matching / Best Buyer Finder / Recycler Verification** — real distance sorting, per-recycler rate publishing, and a local CPCB registration-format mirror (not a live government API — none is publicly available)
+- **Collection Route Optimizer & E-Waste Hotspot Map** — nearest-neighbor routing and a real Leaflet/OpenStreetMap view (map tiles need internet even though the rest of the app works offline)
+- **Community & Institutions / Fair Rotation Contracts** — institutional bulk-collection accounts and renewable dealer contracts
+- **Better Earnings (load pooling)** and a live-computed **Environmental Tracker** (CO₂/trees, from real completed transaction weights)
 
 ## 📁 Project Structure
 

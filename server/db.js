@@ -120,7 +120,122 @@ async function createSchema() {
       created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(kabadiwala_id, recycler_id);
+
+    CREATE TABLE IF NOT EXISTS customer_bookings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      booking_code TEXT UNIQUE,
+      customer_phone TEXT NOT NULL,
+      customer_name TEXT,
+      kabadiwala_id TEXT, kabadiwala_name TEXT,
+      material_id TEXT, material_name TEXT, symbol TEXT,
+      weight_kg REAL, rate_per_kg REAL,
+      quality_grade TEXT, quality_multiplier REAL DEFAULT 1.0,
+      total_amount REAL, payment_mode TEXT,
+      status TEXT NOT NULL DEFAULT 'Requested',
+      gps_lat REAL, gps_lng REAL, photo_data_url TEXT,
+      pooled_lot_id TEXT,
+      created_at TEXT NOT NULL, completed_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_bookings_customer ON customer_bookings(customer_phone);
+    CREATE INDEX IF NOT EXISTS idx_bookings_kabadiwala ON customer_bookings(kabadiwala_id, status);
+
+    CREATE TABLE IF NOT EXISTS recycler_material_rates (
+      recycler_id TEXT NOT NULL,
+      material_id TEXT NOT NULL,
+      rate REAL NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (recycler_id, material_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS collection_schedules (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      kabadiwala_id TEXT NOT NULL,
+      kabadiwala_name TEXT,
+      area_pincode TEXT NOT NULL,
+      day_of_week INTEGER NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_schedules_pincode ON collection_schedules(area_pincode);
+
+    CREATE TABLE IF NOT EXISTS institutions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL, type TEXT,
+      contact_name TEXT, phone TEXT,
+      location TEXT, latitude REAL, longitude REAL,
+      linked_kabadiwala_id TEXT, linked_kabadiwala_name TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS dealer_contracts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      customer_id TEXT NOT NULL, customer_type TEXT NOT NULL, customer_name TEXT,
+      kabadiwala_id TEXT NOT NULL, kabadiwala_name TEXT,
+      start_date TEXT NOT NULL, duration_days INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'Active',
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS rate_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      material_id TEXT NOT NULL,
+      recycler_rate REAL, customer_rate REAL,
+      recorded_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_rate_history_material ON rate_history(material_id, recorded_at);
   `);
+}
+
+// Additive, idempotent column migrations for tables that already existed before a given
+// feature was added — safe to run every boot against a live local or Turso database that
+// may already have rows (never drops or renames anything).
+async function migrateColumns(table, columns) {
+  const info = await db.prepare(`PRAGMA table_info(${table})`).all();
+  const existing = new Set(info.map((c) => c.name));
+  for (const { name, ddl } of columns) {
+    if (!existing.has(name)) {
+      await db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${ddl};`);
+    }
+  }
+}
+
+async function runMigrations() {
+  await migrateColumns('kabadiwalas', [
+    { name: 'latitude', ddl: 'REAL' },
+    { name: 'longitude', ddl: 'REAL' }
+  ]);
+  await migrateColumns('recyclers', [
+    { name: 'latitude', ddl: 'REAL' },
+    { name: 'longitude', ddl: 'REAL' }
+  ]);
+  await migrateColumns('lots', [
+    { name: 'gps_lat', ddl: 'REAL' },
+    { name: 'gps_lng', ddl: 'REAL' },
+    { name: 'quality_grade', ddl: 'TEXT' },
+    { name: 'quality_multiplier', ddl: 'REAL DEFAULT 1.0' },
+    { name: 'pooled_booking_ids_json', ddl: 'TEXT' }
+  ]);
+  await migrateColumns('materials', [
+    { name: 'co2_factor_kg_per_kg', ddl: 'REAL DEFAULT 0' }
+  ]);
+  // Safety guide content originally only had English hazard/health-risk/safe-method text
+  // (even the title/audio-script fields stopped at Hindi/Marathi) — extending to all 7
+  // languages so Tamil/Telugu/Kannada/Malayalam users never silently see Hindi or English
+  // for genuinely safety-critical warnings.
+  await migrateColumns('safety_guides', [
+    { name: 'title_ta', ddl: 'TEXT' }, { name: 'title_te', ddl: 'TEXT' },
+    { name: 'title_kn', ddl: 'TEXT' }, { name: 'title_ml', ddl: 'TEXT' },
+    { name: 'hazard_hi', ddl: 'TEXT' }, { name: 'hazard_mr', ddl: 'TEXT' },
+    { name: 'hazard_ta', ddl: 'TEXT' }, { name: 'hazard_te', ddl: 'TEXT' },
+    { name: 'hazard_kn', ddl: 'TEXT' }, { name: 'hazard_ml', ddl: 'TEXT' },
+    { name: 'health_risk_hi', ddl: 'TEXT' }, { name: 'health_risk_mr', ddl: 'TEXT' },
+    { name: 'health_risk_ta', ddl: 'TEXT' }, { name: 'health_risk_te', ddl: 'TEXT' },
+    { name: 'health_risk_kn', ddl: 'TEXT' }, { name: 'health_risk_ml', ddl: 'TEXT' },
+    { name: 'safe_method_hi', ddl: 'TEXT' }, { name: 'safe_method_mr', ddl: 'TEXT' },
+    { name: 'safe_method_ta', ddl: 'TEXT' }, { name: 'safe_method_te', ddl: 'TEXT' },
+    { name: 'safe_method_kn', ddl: 'TEXT' }, { name: 'safe_method_ml', ddl: 'TEXT' },
+    { name: 'audio_script_ta', ddl: 'TEXT' }, { name: 'audio_script_te', ddl: 'TEXT' },
+    { name: 'audio_script_kn', ddl: 'TEXT' }, { name: 'audio_script_ml', ddl: 'TEXT' }
+  ]);
 }
 
 async function seedIfEmpty() {
@@ -222,13 +337,61 @@ async function seedIfEmpty() {
   }
 
   const insertSafety = db.prepare(`
-    INSERT INTO safety_guides (id, title, title_mr, title_hi, icon, color, hazard, health_risk, safe_method,
-      audio_script_en, audio_script_mr, audio_script_hi)
-    VALUES (@id, @title, @titleMr, @titleHi, @icon, @color, @hazard, @healthRisk, @safeMethod,
-      @audioScriptEn, @audioScriptMr, @audioScriptHi)
+    INSERT INTO safety_guides (id, title, title_mr, title_hi, title_ta, title_te, title_kn, title_ml,
+      icon, color, hazard, hazard_hi, hazard_mr, hazard_ta, hazard_te, hazard_kn, hazard_ml,
+      health_risk, health_risk_hi, health_risk_mr, health_risk_ta, health_risk_te, health_risk_kn, health_risk_ml,
+      safe_method, safe_method_hi, safe_method_mr, safe_method_ta, safe_method_te, safe_method_kn, safe_method_ml,
+      audio_script_en, audio_script_mr, audio_script_hi, audio_script_ta, audio_script_te, audio_script_kn, audio_script_ml)
+    VALUES (@id, @title, @titleMr, @titleHi, @titleTa, @titleTe, @titleKn, @titleMl,
+      @icon, @color, @hazard, @hazardHi, @hazardMr, @hazardTa, @hazardTe, @hazardKn, @hazardMl,
+      @healthRisk, @healthRiskHi, @healthRiskMr, @healthRiskTa, @healthRiskTe, @healthRiskKn, @healthRiskMl,
+      @safeMethod, @safeMethodHi, @safeMethodMr, @safeMethodTa, @safeMethodTe, @safeMethodKn, @safeMethodMl,
+      @audioScriptEn, @audioScriptMr, @audioScriptHi, @audioScriptTa, @audioScriptTe, @audioScriptKn, @audioScriptMl)
   `);
   for (const g of SEED_DATA.safetyGuides) {
     await insertSafety.run(g);
+  }
+}
+
+async function seedCo2FactorsIfMissing() {
+  const rows = await db.prepare('SELECT id FROM materials WHERE co2_factor_kg_per_kg IS NULL OR co2_factor_kg_per_kg = 0').all();
+  if (!rows.length) return;
+  for (const row of rows) {
+    const factor = SEED_DATA.co2FactorsByMaterialId[row.id];
+    if (factor) await db.prepare('UPDATE materials SET co2_factor_kg_per_kg = ? WHERE id = ?').run(factor, row.id);
+  }
+}
+
+// Backfills the 7-language safety-guide columns onto rows that were seeded before this
+// translation work existed (a live deployment's safety_guides rows predate the ta/te/kn/ml
+// and hi/mr hazard/health-risk/safe-method columns added above).
+async function seedSafetyGuideTranslationsIfMissing() {
+  const rows = await db.prepare('SELECT id FROM safety_guides WHERE title_ta IS NULL').all();
+  if (!rows.length) return;
+  const byId = Object.fromEntries(SEED_DATA.safetyGuides.map((g) => [g.id, g]));
+  for (const row of rows) {
+    const g = byId[row.id];
+    if (!g) continue;
+    // The libsql/Turso HTTP driver requires the args object to have exactly the same
+    // number of properties as named parameters in the SQL — passing the full seed-data
+    // object (which also carries title/icon/color/hazard/etc. not referenced here) throws
+    // "Number of arguments mismatch", so only the 27 referenced fields are picked out.
+    await db.prepare(`
+      UPDATE safety_guides SET
+        title_ta = @titleTa, title_te = @titleTe, title_kn = @titleKn, title_ml = @titleMl,
+        hazard_hi = @hazardHi, hazard_mr = @hazardMr, hazard_ta = @hazardTa, hazard_te = @hazardTe, hazard_kn = @hazardKn, hazard_ml = @hazardMl,
+        health_risk_hi = @healthRiskHi, health_risk_mr = @healthRiskMr, health_risk_ta = @healthRiskTa, health_risk_te = @healthRiskTe, health_risk_kn = @healthRiskKn, health_risk_ml = @healthRiskMl,
+        safe_method_hi = @safeMethodHi, safe_method_mr = @safeMethodMr, safe_method_ta = @safeMethodTa, safe_method_te = @safeMethodTe, safe_method_kn = @safeMethodKn, safe_method_ml = @safeMethodMl,
+        audio_script_ta = @audioScriptTa, audio_script_te = @audioScriptTe, audio_script_kn = @audioScriptKn, audio_script_ml = @audioScriptMl
+      WHERE id = @id
+    `).run({
+      id: g.id,
+      titleTa: g.titleTa, titleTe: g.titleTe, titleKn: g.titleKn, titleMl: g.titleMl,
+      hazardHi: g.hazardHi, hazardMr: g.hazardMr, hazardTa: g.hazardTa, hazardTe: g.hazardTe, hazardKn: g.hazardKn, hazardMl: g.hazardMl,
+      healthRiskHi: g.healthRiskHi, healthRiskMr: g.healthRiskMr, healthRiskTa: g.healthRiskTa, healthRiskTe: g.healthRiskTe, healthRiskKn: g.healthRiskKn, healthRiskMl: g.healthRiskMl,
+      safeMethodHi: g.safeMethodHi, safeMethodMr: g.safeMethodMr, safeMethodTa: g.safeMethodTa, safeMethodTe: g.safeMethodTe, safeMethodKn: g.safeMethodKn, safeMethodMl: g.safeMethodMl,
+      audioScriptTa: g.audioScriptTa, audioScriptTe: g.audioScriptTe, audioScriptKn: g.audioScriptKn, audioScriptMl: g.audioScriptMl
+    });
   }
 }
 
@@ -237,7 +400,10 @@ function initDb() {
   if (!initPromise) {
     initPromise = (async () => {
       await createSchema();
+      await runMigrations();
       await seedIfEmpty();
+      await seedCo2FactorsIfMissing();
+      await seedSafetyGuideTranslationsIfMissing();
     })();
   }
   return initPromise;
