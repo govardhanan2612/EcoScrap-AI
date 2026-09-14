@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="EcoScrap AI Field Manual — every screen, badge, and button across the Customer, Kabadiwala, and Recycler apps.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>%F0%9F%93%98</text></svg>">
+<title>EcoScrap AI Field Manual</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Public+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --bg:#f6f8f4;
+    --surface:#ffffff;
+    --surface-alt:#edf1e8;
+    --border:#dbe2d3;
+    --border-strong:#c3cdb8;
+    --ink:#12201a;
+    --ink-muted:#51604f;
+    --ink-faint:#7c8a77;
+    --primary:#1c5b34;
+    --primary-strong:#0f3f22;
+    --primary-soft:#e4efe2;
+    --accent:#a8672f;
+    --accent-strong:#8a5324;
+    --accent-soft:#f3e4d3;
+    --official:#0f6e63;
+    --official-soft:#dcf0ec;
+    --warn:#b23b2c;
+    --warn-soft:#f6e1dc;
+    --shadow: 0 1px 2px rgba(18,32,26,0.06), 0 6px 20px -8px rgba(18,32,26,0.12);
+    --radius-card:14px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#0c130f;
+      --surface:#121b16;
+      --surface-alt:#17221b;
+      --border:#28362c;
+      --border-strong:#374a3c;
+      --ink:#e9f1ea;
+      --ink-muted:#aebda9;
+      --ink-faint:#7f9280;
+      --primary:#74c690;
+      --primary-strong:#98d9ae;
+      --primary-soft:#173523;
+      --accent:#dda06a;
+      --accent-strong:#eab685;
+      --accent-soft:#3a2a1a;
+      --official:#5fc6b6;
+      --official-soft:#123430;
+      --warn:#e58d7c;
+      --warn-soft:#3a201a;
+      --shadow: 0 1px 2px rgba(0,0,0,0.4), 0 10px 30px -10px rgba(0,0,0,0.6);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0c130f;
+    --surface:#121b16;
+    --surface-alt:#17221b;
+    --border:#28362c;
+    --border-strong:#374a3c;
+    --ink:#e9f1ea;
+    --ink-muted:#aebda9;
+    --ink-faint:#7f9280;
+    --primary:#74c690;
+    --primary-strong:#98d9ae;
+    --primary-soft:#173523;
+    --accent:#dda06a;
+    --accent-strong:#eab685;
+    --accent-soft:#3a2a1a;
+    --official:#5fc6b6;
+    --official-soft:#123430;
+    --warn:#e58d7c;
+    --warn-soft:#3a201a;
+    --shadow: 0 1px 2px rgba(0,0,0,0.4), 0 10px 30px -10px rgba(0,0,0,0.6);
+  }
+
+  *{box-sizing:border-box}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:'Public Sans', -apple-system, "Segoe UI", sans-serif;
+    line-height:1.6;
+    scroll-behavior:smooth;
+  }
+  @media (prefers-reduced-motion: reduce){ body{ scroll-behavior:auto; } }
+
+  h1,h2,h3{ font-family:'Fraunces', Georgia, 'Times New Roman', serif; text-wrap:balance; margin:0; color:var(--ink); }
+  code, .mono{ font-family:'IBM Plex Mono', 'Courier New', monospace; font-variant-numeric:tabular-nums; }
+  a{ color:inherit; }
+
+  .icon{ width:20px; height:20px; stroke:currentColor; fill:none; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; flex-shrink:0; }
+
+  /* ---------- shell ---------- */
+  .wrap{ max-width:920px; margin:0 auto; padding:0 24px 96px; }
+
+  /* ---------- sticky wayfinding ---------- */
+  nav.rail{
+    position:sticky; top:0; z-index:40;
+    background:color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter:blur(8px);
+    border-bottom:1px solid var(--border);
+  }
+  .rail-inner{
+    max-width:920px; margin:0 auto; padding:0 24px;
+    display:flex; gap:4px; overflow-x:auto; scrollbar-width:none;
+  }
+  .rail-inner::-webkit-scrollbar{ display:none; }
+  .rail a{
+    display:flex; align-items:center; gap:7px;
+    padding:13px 14px; font-size:13px; font-weight:600; white-space:nowrap;
+    text-decoration:none; color:var(--ink-muted); border-bottom:2px solid transparent;
+  }
+  .rail a:hover{ color:var(--ink); }
+  .rail a:focus-visible{ outline:2px solid var(--primary); outline-offset:-2px; border-radius:4px; }
+  .rail .dot{ width:7px; height:7px; border-radius:50%; background:var(--dot,var(--ink-faint)); flex-shrink:0; }
+
+  /* ---------- cover ---------- */
+  .cover{ padding:56px 0 40px; }
+  .eyebrow{
+    display:inline-flex; align-items:center; gap:8px;
+    font-size:12px; font-weight:700; letter-spacing:.09em; text-transform:uppercase;
+    color:var(--primary); margin-bottom:18px;
+  }
+  .cover h1{ font-size:46px; font-weight:600; line-height:1.08; max-width:15ch; }
+  .cover .lede{ margin-top:16px; font-size:17px; color:var(--ink-muted); max-width:52ch; }
+
+  .stamp{
+    position:absolute; top:44px; right:24px;
+    width:112px; height:112px;
+    border:2px dashed var(--accent);
+    border-radius:6px;
+    transform:rotate(7deg);
+    display:flex; align-items:center; justify-content:center; text-align:center;
+    color:var(--accent-strong); opacity:.85;
+    font-family:'IBM Plex Mono',monospace; font-size:9.5px; font-weight:600; letter-spacing:.04em;
+    line-height:1.5; padding:8px;
+  }
+  .cover-frame{ position:relative; }
+  @media (max-width:640px){ .stamp{ display:none; } }
+
+  .statrow{
+    display:grid; grid-template-columns:repeat(4,1fr); gap:1px;
+    background:var(--border); border:1px solid var(--border); border-radius:12px;
+    overflow:hidden; margin-top:32px;
+  }
+  .statrow div{ background:var(--surface); padding:16px 14px; }
+  .statrow .num{ font-family:'Fraunces',serif; font-size:26px; font-weight:600; color:var(--primary); }
+  .statrow .num.mono{ font-family:'IBM Plex Mono',monospace; font-size:23px; }
+  .statrow .lbl{ font-size:11.5px; color:var(--ink-muted); margin-top:2px; }
+  @media (max-width:640px){ .statrow{ grid-template-columns:repeat(2,1fr); } }
+
+  /* ---------- chapters ---------- */
+  section.chapter{ padding:52px 0; scroll-margin-top:56px; }
+  section.chapter + section.chapter{ border-top:1px solid var(--border); }
+  .chapter.tinted{ background:var(--surface-alt); margin:0 calc(50% - 50vw); padding-left:calc(50vw - 50%); padding-right:calc(50vw - 50%); }
+  .chapter.tinted > .wrap{ padding-left:24px; padding-right:24px; }
+
+  .chapter-head{ display:flex; align-items:flex-start; gap:16px; margin-bottom:8px; }
+  .chapter-icon{
+    width:52px; height:52px; border-radius:50%; flex-shrink:0;
+    background:var(--chip-bg,var(--primary-soft)); color:var(--chip-fg,var(--primary));
+    display:flex; align-items:center; justify-content:center;
+  }
+  .chapter-icon .icon{ width:26px; height:26px; }
+  .chapter-head h2{ font-size:28px; font-weight:600; }
+  .chapter-role{ font-size:12.5px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--chip-fg,var(--primary)); margin-bottom:4px; }
+  .chapter-dek{ color:var(--ink-muted); font-size:15px; max-width:60ch; margin-top:6px; }
+  .chapter-body{ margin-top:32px; }
+
+  /* ---------- login card row (quickstart) ---------- */
+  .rolecards{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-top:28px; }
+  @media (max-width:760px){ .rolecards{ grid-template-columns:1fr; } }
+  .rolecard{
+    background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-card);
+    padding:20px; box-shadow:var(--shadow); display:flex; flex-direction:column; gap:12px;
+  }
+  .rolecard .chapter-icon{ width:40px; height:40px; }
+  .rolecard .chapter-icon .icon{ width:20px; height:20px; }
+  .rolecard h3{ font-family:'Public Sans',sans-serif; font-size:16px; font-weight:800; }
+  .rolecard .step{ font-size:13.5px; color:var(--ink-muted); }
+  .rolecard .step b{ color:var(--ink); font-weight:600; }
+  .rolecard .try{
+    margin-top:auto; padding-top:12px; border-top:1px dashed var(--border-strong);
+    font-size:12.5px; color:var(--chip-fg,var(--primary)); font-weight:700;
+  }
+
+  /* ---------- feature rows ---------- */
+  .flist{ display:flex; flex-direction:column; }
+  .frow{
+    display:grid; grid-template-columns:44px 1fr; gap:16px;
+    padding:16px 0; border-top:1px solid var(--border);
+  }
+  .frow:first-child{ border-top:none; }
+  .fchip{
+    width:44px; height:44px; border-radius:50%;
+    background:var(--chip-bg,var(--primary-soft)); color:var(--chip-fg,var(--primary));
+    display:flex; align-items:center; justify-content:center;
+  }
+  .fname{ font-size:15.5px; font-weight:700; }
+  .fdesc{ font-size:14.5px; color:var(--ink-muted); margin-top:3px; max-width:62ch; }
+  .fdesc code{ font-size:13px; background:var(--surface-alt); border:1px solid var(--border); padding:1px 6px; border-radius:5px; }
+
+  .subhead{
+    font-size:12px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--chip-fg,var(--primary)); margin:36px 0 4px;
+  }
+  .subhead:first-child{ margin-top:0; }
+
+  /* ---------- numbered flow ---------- */
+  .flow{ counter-reset:step; display:flex; flex-direction:column; margin-top:16px; }
+  .flowstep{ display:grid; grid-template-columns:32px 1fr; gap:14px; position:relative; padding-bottom:22px; }
+  .flowstep:last-child{ padding-bottom:0; }
+  .flowstep::before{
+    counter-increment:step; content:counter(step);
+    width:32px; height:32px; border-radius:50%;
+    background:var(--primary); color:var(--surface);
+    display:flex; align-items:center; justify-content:center;
+    font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:13px;
+    z-index:1;
+  }
+  .flowstep:not(:last-child)::after{
+    content:""; position:absolute; left:15px; top:32px; bottom:0; width:2px; background:var(--border-strong);
+  }
+  .flowstep .ftitle{ font-weight:700; font-size:15px; padding-top:5px; }
+  .flowstep .fbody{ font-size:14px; color:var(--ink-muted); margin-top:2px; }
+
+  /* ---------- badges ---------- */
+  .badge{
+    display:inline-flex; align-items:center; gap:5px;
+    font-size:11.5px; font-weight:700; padding:3px 9px; border-radius:99px;
+    font-family:'Public Sans',sans-serif;
+  }
+  .badge.good{ background:var(--official-soft); color:var(--official); }
+  .badge.acc{ background:var(--accent-soft); color:var(--accent-strong); }
+  .badge.warn{ background:var(--warn-soft); color:var(--warn); }
+
+  /* ---------- hazard callout ---------- */
+  .hazard{
+    display:grid; grid-template-columns:40px 1fr; gap:14px;
+    background:var(--warn-soft); border:1px solid color-mix(in srgb, var(--warn) 35%, var(--border));
+    border-radius:var(--radius-card); padding:16px 18px; margin-top:14px;
+  }
+  .hazard .fchip{ background:transparent; color:var(--warn); width:40px; height:40px; }
+  .hazard b{ color:var(--warn); }
+  .hazard .fdesc{ color:var(--ink); opacity:.85; }
+
+  /* ---------- language grid ---------- */
+  .langgrid{ display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-top:16px; }
+  @media (max-width:640px){ .langgrid{ grid-template-columns:repeat(2,1fr); } }
+  .langcell{
+    background:var(--surface); border:1px solid var(--border); border-radius:10px;
+    padding:12px 14px; text-align:center;
+  }
+  .langcell .native{ font-size:16px; font-weight:700; }
+  .langcell .eng{ font-size:11.5px; color:var(--ink-faint); margin-top:2px; }
+
+  /* ---------- glossary ---------- */
+  .glossary{ display:flex; flex-direction:column; margin-top:20px; }
+  .gterm{ display:grid; grid-template-columns:200px 1fr; gap:18px; padding:13px 0; border-top:1px solid var(--border); }
+  .gterm:first-child{ border-top:none; }
+  .gterm dt{ font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:13.5px; color:var(--primary); }
+  .gterm dd{ margin:0; font-size:14px; color:var(--ink-muted); }
+  @media (max-width:640px){ .gterm{ grid-template-columns:1fr; gap:4px; } }
+
+  footer{ padding:40px 0 8px; color:var(--ink-faint); font-size:12.5px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; }
+  footer strong{ color:var(--ink-muted); }
+</style>
+</head>
+<body>
+
+<!-- icon sprite -->
+<svg style="display:none" aria-hidden="true">
+  <symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.2"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/><path d="M9 21h6"/></symbol>
+  <symbol id="i-scale" viewBox="0 0 24 24"><path d="M12 3v18"/><path d="M5 7h14"/><path d="M5 7l-2.6 5.2a2.6 2.6 0 0 0 5.2 0z"/><path d="M19 7l-2.6 5.2a2.6 2.6 0 0 0 5.2 0z"/><path d="M8 21h8"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21s7-6.5 7-11.5A7 7 0 0 0 5 9.5C5 14.5 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.3"/></symbol>
+  <symbol id="i-route" viewBox="0 0 24 24"><circle cx="5" cy="19" r="2"/><circle cx="19" cy="5" r="2"/><path d="M7 19h6a3 3 0 0 0 3-3V9a3 3 0 0 1 3-3"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M9 12l2 2 4-4"/></symbol>
+  <symbol id="i-leaf" viewBox="0 0 24 24"><path d="M20 4C10 4 4 10 4 18c0 .6.1 1.2.2 1.8C13 19.6 20 12.6 20 4z"/><path d="M5 19c4-1 9-4 12-9"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 5h16v11H8l-4 4z"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3l10 18H2z"/><path d="M12 10v4"/><circle cx="12" cy="17.2" r="0.9" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-cert" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="1.5"/><path d="M8 8h8M8 12h8M8 16h5"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.5 2.7-6 6-6s6 2.5 6 6"/><circle cx="17.5" cy="9" r="2.3"/><path d="M15.6 14.2c2.8.4 4.9 2.8 4.9 5.8"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.7"/><path d="M20 4v5h-5"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/></symbol>
+  <symbol id="i-wifioff" viewBox="0 0 24 24"><path d="M2 8.5a16 16 0 0 1 20 0"/><path d="M5.5 12a11 11 0 0 1 13 0"/><path d="M9 15.5a6 6 0 0 1 6 0"/><circle cx="12" cy="19" r="1" fill="currentColor" stroke="none"/><path d="M3 3l18 18"/></symbol>
+  <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 3l2.6 5.9 6.4.6-4.8 4.3 1.4 6.2L12 16.9 6.4 20l1.4-6.2L3 9.5l6.4-.6z"/></symbol>
+  <symbol id="i-map" viewBox="0 0 24 24"><path d="M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2z"/><path d="M9 4v14M15 6v14"/></symbol>
+</svg>
+
+<nav class="rail" aria-label="Manual sections">
+  <div class="rail-inner">
+    <a href="#quickstart"><svg class="icon" style="width:15px;height:15px"><use href="#i-route"/></svg>Quick Start</a>
+    <a href="#customer" style="--dot:var(--primary)"><span class="dot"></span>Customer</a>
+    <a href="#kabadiwala" style="--dot:var(--accent)"><span class="dot"></span>Kabadiwala</a>
+    <a href="#recycler" style="--dot:var(--official)"><span class="dot"></span>Recycler</a>
+    <a href="#platform"><svg class="icon" style="width:15px;height:15px"><use href="#i-globe"/></svg>Platform-Wide</a>
+    <a href="#glossary">Glossary</a>
+  </div>
+</nav>
+
+<div class="wrap cover-frame">
+  <div class="stamp">CPCB · EPR<br>FORM&#8209;6 STYLE<br>FIELD MANUAL</div>
+  <div class="cover">
+    <div class="eyebrow"><svg class="icon" style="width:15px;height:15px"><use href="#i-leaf"/></svg>Smart India Hackathon · PS 26229</div>
+    <h1>EcoScrap AI Field Manual</h1>
+    <p class="lede">Every screen, badge, and button across the Customer, Kabadiwala, and Recycler apps — how to read it, when to tap it, and what happens next.</p>
+    <div class="statrow">
+      <div><div class="num">28</div><div class="lbl">features across 8 categories</div></div>
+      <div><div class="num">3</div><div class="lbl">roles, one platform</div></div>
+      <div><div class="num">7</div><div class="lbl">languages, fully spoken</div></div>
+      <div><div class="num mono">0₹</div><div class="lbl">data cost — AI runs offline</div></div>
+    </div>
+  </div>
+</div>
+
+<section class="chapter" id="quickstart">
+  <div class="wrap">
+    <div class="chapter-head">
+      <div class="chapter-icon"><svg class="icon"><use href="#i-route"/></svg></div>
+      <div>
+        <h2>Getting In</h2>
+        <p class="chapter-dek">EcoScrap AI has no passwords. Each role signs in a different way — pick yours below.</p>
+      </div>
+    </div>
+    <div class="rolecards">
+      <div class="rolecard">
+        <div class="chapter-icon"><svg class="icon"><use href="#i-leaf"/></svg></div>
+        <h3>Customer</h3>
+        <p class="step"><b>Enter</b> your name, phone number, and pincode. That's it — you're in.</p>
+        <p class="step">No PIN, no OTP, no waiting.</p>
+        <div class="try">First move → open the <b>Sell</b> tab and scan something</div>
+      </div>
+      <div class="rolecard">
+        <div class="chapter-icon"><svg class="icon"><use href="#i-scale"/></svg></div>
+        <h3>Kabadiwala</h3>
+        <p class="step"><b>Returning?</b> Sign in with your phone + 4-digit PIN.</p>
+        <p class="step"><b>New?</b> Register your yard, vehicle, and pincode — you're assigned PIN <code>1234</code> and your location is captured automatically.</p>
+        <div class="try">First move → open <b>Commodity Exchange</b> to see live rates</div>
+      </div>
+      <div class="rolecard">
+        <div class="chapter-icon"><svg class="icon"><use href="#i-shield"/></svg></div>
+        <h3>Recycler</h3>
+        <p class="step"><b>Enter</b> your CPCB/SPCB registration number, e.g. <code>CPCB/EPR-REC/2023/MH-0842</code>.</p>
+        <p class="step">First time, add your facility name and phone — after that, the number alone signs you back in.</p>
+        <div class="try">First move → check your <b>Incoming Lots</b> queue</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="chapter tinted" id="customer" style="--chip-bg:var(--primary-soft); --chip-fg:var(--primary);">
+  <div class="wrap">
+    <div class="chapter-head">
+      <div class="chapter-icon"><svg class="icon"><use href="#i-leaf"/></svg></div>
+      <div>
+        <div class="chapter-role">Role 1</div>
+        <h2>Customer</h2>
+        <p class="chapter-dek">You've got old wires, a dead phone battery, or a broken monitor. This is where it becomes cash at your doorstep.</p>
+      </div>
+    </div>
+
+    <div class="chapter-body">
+      <div class="subhead">Sell Tab</div>
+      <div class="flist">
+        <div class="frow">
+          <div class="fchip"><svg class="icon"><use href="#i-camera"/></svg></div>
+          <div><div class="fname">AI Scrap Scanner</div><div class="fdesc">Tap the camera card and photograph your item. It's identified instantly, given a confidence score, and graded <code>A</code> / <code>B</code> / <code>C</code> — a Grade A item pays a 1.1× bonus, Grade C pays 0.85×. Runs entirely on your device, so it works with zero signal.</div></div>
+        </div>
+        <div class="frow">
+          <div class="fchip"><svg class="icon"><use href="#i-mic"/></svg></div>
+          <div><div class="fname">Voice Selling</div><div class="fdesc">Tap the mic and just say what you have — "copper wire, two hundred grams." The material and weight fill in on their own, in whichever of the 7 languages you're using.</div></div>
+        </div>
+        <div class="frow">
+          <div class="fchip"><svg class="icon"><use href="#i-scale"/></svg></div>
+          <div><div class="fname">Connect Smart Scale</div><div class="fdesc">Simulates pairing with a Bluetooth scale — watch it search, connect, and settle on a reading, which drops straight into the calculator.</div></div>
+        </div>
+        <div class="frow">
+          <div class="fchip"><svg class="icon"><use href="#i-scale"/></svg></div>
+          <div><div class="fname">Weight & Payout Calculator</div><div class="fdesc">Pick a material chip, nudge the weight in 100g steps (or use a preset), and watch your guaranteed cash total update live.</div></div>
+        </div>
+      </div>
+
+      <div class="subhead" style="margin-top:40px;">Dealers Tab</div>
+      <div class="flist">
+        <div class="frow">
+          <div class="fchip"><svg class="icon"><use href="#i-pin"/></svg></div>
+          <div><div class="fname">Nearby Dealers & Live ETA</div><div class="fdesc">Once you request a pickup, a three-stage bar — <b>Confirmed → En Route → Handover</b> — actually advances in real time as your dealer's ETA counts down.</div></div>
+        </div>
+        <div class="frow">
+          <div class="fchip"><svg class="icon"><use href="#i-clock"/></svg></div>
+          <div><div class="fname">Smart Collection Day</div><div class="fdesc">If a dealer runs a fixed weekly round in your pincode, you'll see the next date here before you even ask.</div></div>
+        </div>
+      </div>
+
+      <div class="subhead" style="margin-top:40px;">Profile Tab</div>
+      <div class="flist">
+        <div class="frow">
+          <div class="fchip"><svg class="icon"><use href="#i-cert"/></svg></div>
+          <div><div class="fname">Digital Scrap Passport</div><div class="fdesc">Every completed pickup gets its own record — photo, GPS-verified handover location, weight, grade, and payout — open with <span class="badge acc">View Passport</span> on any past sale.</div></div>
+        </div>
+        <div class="frow">
+          <div class="fchip"><svg class="icon"><use href="#i-leaf"/></svg></div>
+          <div><div class="fname">Environmental Tracker</div><div class="fdesc">Trees-equivalent and kilograms of CO₂ prevented, calculated fresh from your actual completed sales — not a placeholder number.</div></div>
+        </div>
+        <div class="frow">
+          <div class="fchip"><svg class="icon"><use href="#i-users"/></svg></div>
+          <div><div class="fname">Community & Institutions</div><div class="fdesc">Register a college, office, or housing society for scheduled bulk collection, and get linked to the nearest dealer automatically.</div></div>
+        </div>
+        <div class="frow">
+          <div class="fchip"><svg class="icon"><use href="#i-refresh"/></svg></div>
+          <div><div class="fname">Fair Rotation Contract</div><div class="fdesc">Lock in one dealer for a 15-day run. When it lapses, renew with the same dealer or switch to another — your call.</div></div>
+        </div>
+      </div>
+
+      <div class="subhead" style="margin-top:40px;">How a Pickup Actually Runs</div>
+      <div class="flow">
+        <div class="flowstep"><div><div class="ftitle">Scan or speak your item</div><div class="fbody">The AI Scanner or Voice Selling fills in material, weight, and grade.</div></div></div>
+        <div class="flowstep"><div><div class="ftitle">Check the guaranteed price</div><div class="fbody">The payout box totals it up before you commit to anything.</div></div></div>
+        <div class="flowstep"><div><div class="ftitle">Request Doorstep Pickup</div><div class="fbody">Your real GPS location and photo are attached as handover proof.</div></div></div>
+        <div class="flowstep"><div><div class="ftitle">Track the dealer live</div><div class="fbody">Watch the progress bar move from Confirmed to En Route to your door.</div></div></div>
+        <div class="flowstep"><div><div class="ftitle">Mark as Collected</div><div class="fbody">Cash changes hands, and your Digital Scrap Passport unlocks instantly.</div></div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="chapter" id="kabadiwala" style="--chip-bg:var(--accent-soft); --chip-fg:var(--accent-strong);">
+  <div class="wrap">
+    <div class="chapter-head">
+      <div class="chapter-icon"><svg class="icon"><use href="#i-scale"/></svg></div>
+      <div>
+        <div class="chapter-role">Role 2</div>
+        <h2>Kabadiwala</h2>
+        <p class="chapter-dek">You collect from customers and sell onward to recyclers. This is your trading floor and your route sheet in one.</p>
+      </div>
+    </div>
+
+    <div class="chapter-body">
+      <div class="subhead">Commodity Exchange Tab</div>
+      <div class="flist">
+        <div class="frow">
+          <div class="fchip"><svg class="icon"><use href="#i-star"/></svg></div>
+          <div><div class="fname">Live Rates by Category</div><div class="fdesc">Metals & Wires, Circuit Boards, Batteries, Glass & Displays, and Plastics — each with day high/low and a real price-trend sparkline that only moves when a recycler actually changes a rate.</div></div>
+        </div>
+        <div class="frow">
+          <div class="fchip"><svg class="icon"><use href="#i-cert"/></svg></div>
+          <div><div class="fname">Sell Lot → Fair Price Detector</div><div class="fdesc">Building a lot manifest, you can propose your own rate — a live badge tells you instantly if it's <span class="badge good">Fair</span>, <span class="badge warn">Below Benchmark</span>, or above it, before you dispatch.</div></div>
+        </div>
+      </div>
+
+      <div class="subhead" style="margin-top:40px;">Warehouse & Recyclers Tab</div>
+      <div class="flist">
+        <div class="frow">
+          <div class="fchip"><svg class="icon"><use href="#i-pin"/></svg></div>
+          <div><div class="fname">Distance-Sorted Recyclers</div><div class="fdesc">Cards are ranked by your actual real-world distance to each facility, not a fixed list order.</div></div>
+        </div>
+        <div class="frow">
+          <div class="fchip"><svg class="icon"><use href="#i-star"/></svg></div>
+          <div><div class="fname">Best Payer Badge</div><div class="fdesc">A recycler can publish their own rate for a material (marked <code>✦</code>) — whoever pays the most for what you're carrying earns the <span class="badge acc">🏆 Best Payer</span> tag.</div></div>
+        </div>
+        <div class="frow">
+          <div class="fchip"><svg class="icon"><use href="#i-route"/></svg></div>
+          <div><div class="fname">Route Optimizer</div><div class="fdesc">Orders your pending customer pickups nearest-stop-first and opens the whole run as one multi-stop Google Maps route.</div></div>
+        </div>
+        <div class="frow">
+          <div class="fchip"><svg class="icon"><use href="#i-layers"/></svg></div>
+          <div><div class="fname">Load Pooling</div><div class="fdesc">Two or more completed pickups of the same material can be combined into one wholesale lot for a +5% consolidation bonus.</div></div>
+        </div>
+        <div class="frow">
+          <div class="fchip"><svg class="icon"><use href="#i-clock"/></svg></div>
+          <div><div class="fname">Smart Collection Day</div><div class="fdesc">Set a recurring weekday for your service pincode — it shows up automatically for every customer nearby.</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="chapter tinted" id="recycler" style="--chip-bg:var(--official-soft); --chip-fg:var(--official);">
+  <div class="wrap">
+    <div class="chapter-head">
+      <div class="chapter-icon"><svg class="icon"><use href="#i-shield"/></svg></div>
+      <div>
+        <div class="chapter-role">Role 3</div>
+        <h2>Recycler</h2>
+        <p class="chapter-dek">The compliance end of the chain — verifying weight, catching bad rates, and issuing the paperwork that makes a lot official.</p>
+      </div>
+    </div>
+
+    <div class="chapter-body">
+      <div class="flist">
+        <div class="frow">
+          <div class="fchip"><svg class="icon"><use href="#i-cert"/></svg></div>
+          <div><div class="fname">Incoming Lots</div><div class="fdesc">Every lot a kabadiwala dispatches to you lands here with its weight, rate, GPS handover point, and CPCB Form-6 manifest number.</div></div>
+        </div>
+        <div class="frow">
+          <div class="fchip"><svg class="icon"><use href="#i-alert"/></svg></div>
+          <div><div class="fname">Fraud / Underpayment Alert</div><div class="fdesc">If a lot's locked-in rate has drifted more than 15% from today's benchmark by the time you go to pay it, you'll get a warning that requires an explicit acknowledgement before you can proceed.</div></div>
+        </div>
+        <div class="frow">
+          <div class="fchip"><svg class="icon"><use href="#i-cert"/></svg></div>
+          <div><div class="fname">CPCB EPR Certificate</div><div class="fdesc">Verifying a lot's weight and confirming payment issues a Form-6 style certificate — collector, material, weight, GPS geotag, and audit status, ready to view or export.</div></div>
+        </div>
+        <div class="frow">
+          <div class="fchip"><svg class="icon"><use href="#i-scale"/></svg></div>
+          <div><div class="fname">Rate Management</div><div class="fdesc">Update the shared platform rate every dealer sees, or publish your own competitive rate for one material to chase the Best Payer badge.</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="chapter" id="platform">
+  <div class="wrap">
+    <div class="chapter-head">
+      <div class="chapter-icon"><svg class="icon"><use href="#i-globe"/></svg></div>
+      <div>
+        <h2>Works the Same for Everyone</h2>
+        <p class="chapter-dek">A handful of tools sit outside the three role dashboards — reachable from the footer or wherever they're relevant, whichever role you're signed in as.</p>
+      </div>
+    </div>
+
+    <div class="chapter-body">
+      <div class="flist">
+        <div class="frow">
+          <div class="fchip"><svg class="icon"><use href="#i-mic"/></svg></div>
+          <div><div class="fname">Ask EcoScrap AI</div><div class="fdesc">Type or speak a question — "what's the price of copper wire?", "nearest dealer?" — and get an answer spoken back, pulled from today's real rates and locations, not a script.</div></div>
+        </div>
+        <div class="frow">
+          <div class="fchip"><svg class="icon"><use href="#i-map"/></svg></div>
+          <div><div class="fname">E-Waste Hotspot Map</div><div class="fdesc">A live map of every registered dealer, recycler, and completed lot. Needs a connection to load its tiles even when the rest of the app is working offline.</div></div>
+        </div>
+        <div class="frow">
+          <div class="fchip"><svg class="icon"><use href="#i-wifioff"/></svg></div>
+          <div><div class="fname">Offline Mode</div><div class="fdesc">Lose signal and the app keeps showing last-synced prices, with a banner marking anything queued. Reconnect and it syncs itself — nothing to redo.</div></div>
+        </div>
+        <div class="frow">
+          <div class="fchip"><svg class="icon"><use href="#i-chat"/></svg></div>
+          <div><div class="fname">In-App Connect</div><div class="fdesc">A direct chat thread between a kabadiwala and a recycler, attached to whichever facility card you opened it from.</div></div>
+        </div>
+      </div>
+
+      <div class="subhead" style="margin-top:40px;">Speak Your Language</div>
+      <p class="fdesc" style="margin-bottom:4px;">Every screen, every button, and every spoken response — switch anytime from the top bar.</p>
+      <div class="langgrid">
+        <div class="langcell"><div class="native">English</div><div class="eng">EN</div></div>
+        <div class="langcell"><div class="native">हिन्दी</div><div class="eng">Hindi</div></div>
+        <div class="langcell"><div class="native">मराठी</div><div class="eng">Marathi</div></div>
+        <div class="langcell"><div class="native">தமிழ்</div><div class="eng">Tamil</div></div>
+        <div class="langcell"><div class="native">తెలుగు</div><div class="eng">Telugu</div></div>
+        <div class="langcell"><div class="native">ಕನ್ನಡ</div><div class="eng">Kannada</div></div>
+        <div class="langcell"><div class="native">മലയാളം</div><div class="eng">Malayalam</div></div>
+      </div>
+
+      <div class="subhead" style="margin-top:40px;">Safety & Hazard Guide</div>
+      <p class="fdesc">Four real hazards, explained and spoken in all seven languages — open it anytime from the footer.</p>
+      <div class="hazard">
+        <div class="fchip"><svg class="icon"><use href="#i-alert"/></svg></div>
+        <div><b>Never burn insulated wire.</b> <span class="fdesc" style="display:inline">Burning PVC releases dioxin gas. Sell cables unstripped — recyclers pay for the plastic too.</span></div>
+      </div>
+      <div class="hazard">
+        <div class="fchip"><svg class="icon"><use href="#i-alert"/></svg></div>
+        <div><b>Never acid-leach circuit boards at home.</b> <span class="fdesc" style="display:inline">It recovers a fraction of the value and the fumes cause serious harm. Sell whole boards to a CPCB unit instead.</span></div>
+      </div>
+      <div class="hazard">
+        <div class="fchip"><svg class="icon"><use href="#i-alert"/></svg></div>
+        <div><b>Never puncture a lithium battery.</b> <span class="fdesc" style="display:inline">Tape the terminals and store in a dry container away from other scrap metal.</span></div>
+      </div>
+      <div class="hazard">
+        <div class="fchip"><svg class="icon"><use href="#i-alert"/></svg></div>
+        <div><b>Never smash a CRT tube.</b> <span class="fdesc" style="display:inline">It implodes with real force, scattering glass and lead dust. Deliver it whole.</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="chapter tinted" id="glossary">
+  <div class="wrap">
+    <div class="chapter-head">
+      <div class="chapter-icon"><svg class="icon"><use href="#i-cert"/></svg></div>
+      <div><h2>Terms Worth Knowing</h2></div>
+    </div>
+    <dl class="glossary">
+      <div class="gterm"><dt>CPCB / SPCB</dt><dd>Central / State Pollution Control Board — the government body that authorizes e-waste recyclers in India.</dd></div>
+      <div class="gterm"><dt>EPR</dt><dd>Extended Producer Responsibility — the compliance framework a recycled lot's paperwork is issued under.</dd></div>
+      <div class="gterm"><dt>Form-6 Manifest</dt><dd>The official record format for an e-waste handover, from collection through to certified recycling.</dd></div>
+      <div class="gterm"><dt>Kabadiwala</dt><dd>An informal scrap dealer or aggregator — the link between individual customers and licensed recyclers.</dd></div>
+      <div class="gterm"><dt>Doorstep vs. wholesale rate</dt><dd>Customers sell at the doorstep rate; kabadiwalas resell to recyclers at the (higher) wholesale rate.</dd></div>
+      <div class="gterm"><dt>Grade A / B / C</dt><dd>The AI Scanner's quality read on an item, worth a 1.1×, 1.0×, or 0.85× payout multiplier respectively.</dd></div>
+      <div class="gterm"><dt>Best Payer</dt><dd>The badge earned by whichever recycler is currently offering the highest rate for a given material.</dd></div>
+    </dl>
+  </div>
+</section>
+
+<div class="wrap">
+  <footer>
+    <div>EcoScrap AI · Built for Smart India Hackathon, Problem Statement 26229 · Team Techwolves</div>
+    <div><strong>Field Manual</strong> — keep this tab open while you learn the app.</div>
+  </footer>
+</div>
+</body>
+</html>
